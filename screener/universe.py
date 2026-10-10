@@ -4,9 +4,9 @@ input/watchlist.csv  symbol,name,isin,yahoo_symbol,lists
     One company per row; give at least one of symbol, isin or yahoo_symbol. A yahoo_symbol is used as is; otherwise
     the symbol (or ISIN) is resolved to a Yahoo listing, helped by the name. `lists` takes free labels separated
     by ';' (for example "Core; Semis"); they become filters in the report and dashboard.
-input/holdings.csv   isin,symbol,name,shares,value_eur,cost_eur
-    Your positions. value_eur is the current position value and cost_eur the euro cost basis of the shares held
-    (optional; it enables the score at your cost). A holding attaches to the watchlist row with the same ISIN or
+input/holdings.csv   isin,symbol,name,yahoo_symbol,shares,value_eur,cost_eur
+    Your positions. cost_eur is the euro cost basis of the shares held (optional; it enables the score at your cost).
+    value_eur is optional too: left empty, the run values the position at shares x today's price. A holding attaches to the watchlist row with the same ISIN or
     symbol, else to a unique company-name match, else it is screened on its own.
 """
 from __future__ import annotations
@@ -110,10 +110,11 @@ def load_holdings(path: Path) -> list[Entry]:
         return []
     out = []
     for r in _rows(path):
-        isin, sym = r.get("isin", "").upper(), r.get("symbol", "")
-        if not (isin or sym):
+        isin, sym, ysym = r.get("isin", "").upper(), r.get("symbol", ""), r.get("yahoo_symbol", "")
+        if not (isin or sym or ysym):
             continue
-        out.append(Entry(key=isin or sym, name=r.get("name") or isin or sym, ticker=sym, isin=isin, owned=True,
+        out.append(Entry(key=isin or ysym or sym, name=r.get("name") or isin or ysym or sym, ticker=sym, isin=isin,
+                         yahoo=ysym, owned=True,
                          shares=_num(r.get("shares", "")), position_eur=_num(r.get("value_eur", "")),
                          cost_eur=_num(r.get("cost_eur", "")), lists={"Holdings"}))
     return out
@@ -125,6 +126,7 @@ def merge(watchlist: list[Entry], holdings: list[Entry]) -> list[Entry]:
     merged = list(watchlist)
     for p in holdings:
         hits = [w for w in watchlist if p.isin and w.isin == p.isin]
+        hits = hits or [w for w in watchlist if p.yahoo and p.yahoo in (w.yahoo, w.ticker)]
         hits = hits or [w for w in watchlist if p.ticker and p.ticker in (w.ticker, w.yahoo)]
         hits = hits or [w for w in watchlist if names_match(p.name, w.name)]
         if len(hits) == 1:

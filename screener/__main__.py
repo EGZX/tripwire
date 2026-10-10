@@ -111,8 +111,11 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # keep the run going; surface the problem in the report
             m = {"class": "error", "flags": f"metrics failed: {type(exc).__name__}: {exc}"}
         if e.owned and m.get("class") != "error":
+            if not e.position_eur:  # no value in the holdings file: shares at today's price
+                value = metrics.position_value(m.get("price"), m.get("quote_ccy"), e.shares, fx)
+                base["position_eur"] = value if value == value else None
             m.update(metrics.cost_basis(m.get("price"), m.get("ceiling_px"), m.get("quote_ccy"), e.shares, e.cost_eur,
-                                        e.position_eur, fx))
+                                        base["position_eur"] or 0.0, fx))
         rows.append({**base, **m, "symbol": e.yahoo})
     for e in unresolved:
         rows.append({"symbol": "", "name": e.name, "owned": e.owned, "position_eur": e.position_eur or None,

@@ -313,3 +313,24 @@ ul.diff { margin: 0 0 8px; padding-left: 18px; font-size: 12px; }
 ul.diff li { margin: 2px 0; }
 .banner.ok { background: var(--bg-ok); border-color: color-mix(in srgb, var(--fg-ok) 35%, transparent); color: var(--fg-ok); }
 .banner ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* ---------- lists editor */
+.dirty-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 6px; vertical-align: middle; }
+.search-row { display: flex; gap: 10px; align-items: center; }
+table.data.edit td { padding: 2px 6px; height: 32px; }
+table.data.edit td input { width: 100%; height: 26px; min-width: 0; padding: 2px 6px; border: 1px solid transparent; border-radius: var(--radius-control);
+  background: transparent; font-size: 12px; }
+table.data.edit td input:hover { border-color: var(--border); background: var(--bg-input); }
+table.data.edit td input:focus { border-color: var(--focus); background: var(--bg-input); outline: none; }
+table.data.edit td input:disabled { color: inherit; }
+table.data.edit td input[type="number"] { text-align: right; font-variant-numeric: tabular-nums; }
+table.data.edit td input::placeholder { color: var(--fg-disabled); }
+table.data.edit tr.added td { background: color-mix(in srgb, var(--pos) 9%, transparent); }
+table.data.edit tr.changed td { background: color-mix(in srgb, var(--warning-accent) 10%, transparent); }
+table.data.edit tr.removed td { opacity: .5; }
+table.data.edit tr.removed td input { text-decoration: line-through; }
+td.actions { white-space: nowrap; text-align: right; }
+td.actions .btn + .btn, td.actions .chip + .btn, td.actions .btn + .chip { margin-left: 6px; }
+.latest { display: inline-flex; gap: 8px; align-items: center; }
+pre.log { margin: 0; max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: var(--radius-control); background: var(--bg-window);
+  border: 1px solid var(--sep); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; }

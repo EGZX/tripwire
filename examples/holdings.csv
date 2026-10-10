@@ -1,4 +1,4 @@
-isin,symbol,name,shares,value_eur,cost_eur
-US0378331005,AAPL,Apple Inc.,20,3600.00,2900.00
-DE0007236101,SIE,Siemens AG,10,2050.00,1700.00
-IE00B4L5Y983,,iShares Core MSCI World UCITS ETF,50,5100.00,4300.00
+isin,symbol,name,yahoo_symbol,shares,value_eur,cost_eur
+US0378331005,AAPL,Apple Inc.,,20,3600.00,2900.00
+DE0007236101,SIE,Siemens AG,,10,2050.00,1700.00
+IE00B4L5Y983,,iShares Core MSCI World UCITS ETF,,50,5100.00,4300.00

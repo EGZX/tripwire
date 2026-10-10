@@ -1,9 +1,10 @@
 """Local HTTP server: static files from ./static plus a small JSON API.
 
-Binds to 127.0.0.1 by default and rejects requests whose Host header is not a loopback name, so a web page
-in the browser cannot reach it through DNS rebinding. GET/HEAD serve runs and config. The one write path,
-POST /api/config, edits config.toml and is allowed only from loopback (unless --allow-remote-edit), requires the
-per-process CSRF token handed out by GET /api/config, and rejects cross-site Origins. --read-only removes it.
+Binds to 127.0.0.1 by default and rejects requests whose Host header is not a loopback name, so a web page in the
+browser cannot reach it through DNS rebinding. GET/HEAD serve runs, config, input lists and symbol search. The write
+paths (POST /api/config for config.toml, POST /api/inputs for the watchlist and holdings, POST /api/rerun to start a
+screener run) are allowed only from this machine (unless --allow-remote-edit), require the per-process CSRF token
+handed out by GET /api/config, and reject cross-site Origins. --read-only removes them.
 """
 from __future__ import annotations
 
@@ -15,7 +16,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from . import search as yahoo_search
 from .data import Store
+from .jobs import Runner
 
 STATIC = Path(__file__).resolve().parent / "static"
 LOOPBACK = {"127.0.0.1", "localhost", "[::1]"}
@@ -33,12 +36,14 @@ def _host_of(raw: str) -> str:
 
 
 def make_handler(store: Store, quiet: bool = True, allowed_hosts: tuple[str, ...] = (), base_path: str = "",
-                 read_only: bool = False, allow_remote_edit: bool = False, csrf_token: str | None = None):
+                 read_only: bool = False, allow_remote_edit: bool = False, csrf_token: str | None = None,
+                 runner: Runner | None = None, search=yahoo_search.search):
     """allowed_hosts: extra Host names accepted besides loopback (e.g. the Tailscale name of this machine).
     base_path: optional mount prefix such as "/screener" when a reverse proxy serves the dashboard under a path."""
     allowed = LOOPBACK | {h.lower() for h in allowed_hosts}
     base_path = "/" + base_path.strip("/") if base_path.strip("/") else ""
     token = csrf_token or secrets.token_urlsafe(32)
+    runner = runner or Runner(store.root)
 
     def is_local(handler) -> bool:
         """This machine, not proxied: loopback socket peer, loopback Host and no proxy headers."""
@@ -117,6 +122,15 @@ def make_handler(store: Store, quiet: bool = True, allowed_hosts: tuple[str, ...
                     payload = store.config_payload()
                     payload.update(editable=editable(self), csrf=token, read_only=read_only)
                     return self._json(payload)
+                if path == "/api/inputs":
+                    return self._json({**store.inputs_payload(), "editable": editable(self)})
+                if path == "/api/search":
+                    try:
+                        return self._json({"results": search(q.get("q", ""))})
+                    except RuntimeError as exc:
+                        return self._json({"results": [], "error": str(exc)}, HTTPStatus.BAD_GATEWAY)
+                if path == "/api/rerun":
+                    return self._json(runner.status())
             except KeyError as exc:
                 return self._json({"error": f"unknown run {exc}"}, HTTPStatus.NOT_FOUND)
             except Exception as exc:
@@ -136,7 +150,7 @@ def make_handler(store: Store, quiet: bool = True, allowed_hosts: tuple[str, ...
             if routed is None:
                 return
             path, _ = routed
-            if path != "/api/config":
+            if path not in ("/api/config", "/api/inputs", "/api/rerun"):
                 return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             if read_only:
                 return self._json({"error": "dashboard started with --read-only"}, HTTPStatus.METHOD_NOT_ALLOWED)
@@ -157,6 +171,14 @@ def make_handler(store: Store, quiet: bool = True, allowed_hosts: tuple[str, ...
             except (ValueError, UnicodeDecodeError) as exc:
                 return self._json({"error": f"bad JSON: {exc}"}, HTTPStatus.BAD_REQUEST)
             try:
+                if path == "/api/rerun":
+                    started = runner.start()
+                    return self._json({**runner.status(), "started_now": started},
+                                      HTTPStatus.ACCEPTED if started else HTTPStatus.CONFLICT)
+                if path == "/api/inputs":
+                    payload, status = store.edit_inputs(str(body.get("kind", "")), body.get("rows"),
+                                                        bool(body.get("dry_run")), body.get("base_sha"))
+                    return self._json(payload, status)
                 payload, status = store.edit_config(body.get("valuation") or {}, body.get("rates") or {},
                                                     bool(body.get("dry_run")), body.get("base_sha"))
             except Exception as exc:
@@ -179,7 +201,7 @@ def make_handler(store: Store, quiet: bool = True, allowed_hosts: tuple[str, ...
 
 def serve(store: Store, host: str, port: int, quiet: bool = True, allowed_hosts: tuple[str, ...] = (),
           base_path: str = "", read_only: bool = False, allow_remote_edit: bool = False,
-          unsafe_bind: bool = False) -> ThreadingHTTPServer:
+          unsafe_bind: bool = False, runner: Runner | None = None, search=yahoo_search.search) -> ThreadingHTTPServer:
     """Refuses a non-loopback bind unless unsafe_bind: the Host check stops browsers (DNS rebinding), not other
     machines, which can simply send "Host: 127.0.0.1" and read every run, holdings included. To reach the dashboard
     from elsewhere, keep it on loopback and put a private reverse proxy (Tailscale Serve) in front."""
@@ -188,6 +210,7 @@ def serve(store: Store, host: str, port: int, quiet: bool = True, allowed_hosts:
                          "network. Keep it on 127.0.0.1 behind a private proxy, or pass unsafe_bind (--unsafe-bind).")
     mimetypes.add_type("text/javascript", ".js")
     mimetypes.add_type("text/css", ".css")
-    httpd = ThreadingHTTPServer((host, port), make_handler(store, quiet, allowed_hosts, base_path, read_only, allow_remote_edit))
+    httpd = ThreadingHTTPServer((host, port), make_handler(store, quiet, allowed_hosts, base_path, read_only, allow_remote_edit,
+                                                              runner=runner, search=search))
     httpd.daemon_threads = True
     return httpd

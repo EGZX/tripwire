@@ -149,6 +149,7 @@ async function loadRun() {
     S.data = await getJSON(q);
     S.rows = S.data.rows.map((r) => ({ ...r, owned: !!r.owned, candidate: !!r.candidate }));
     S.bySym = new Map(S.rows.filter((r) => r.symbol).map((r) => [r.symbol, r]));
+    S.byIsin = new Map(S.rows.filter((r) => r.symbol && r.isin).map((r) => [String(r.isin).toUpperCase(), r]));
     S.hist = {};
   } catch (e) { return fatal("Could not load run " + S.run + ": " + e.message); }
   finally { $("main").classList.remove("loading"); }
@@ -174,6 +175,7 @@ const VIEWS = [
   { id: "overview", label: "Overview", icon: '<rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/>' },
   { id: "screen", label: "Screen", icon: '<path d="M3 5h14M3 10h14M3 15h14"/><path d="M7 3v14" opacity=".5"/>' },
   { id: "holdings", label: "Holdings", icon: '<path d="M3 16V8l7-4 7 4v8z"/><path d="M8 16v-5h4v5"/>' },
+  { id: "lists", label: "Lists", icon: '<path d="M7 5h10M7 10h10M7 15h6"/><circle cx="3.5" cy="5" r=".8"/><circle cx="3.5" cy="10" r=".8"/><circle cx="3.5" cy="15" r=".8"/><path d="M16 13v6M13 16h6"/>' },
   { id: "changes", label: "Changes", icon: '<path d="M4 7h11l-3-3M16 13H5l3 3"/>' },
   { id: "data", label: "Data quality", icon: '<path d="M10 3l7.5 13h-15z"/><path d="M10 8v4M10 14.2v.3"/>' },
   { id: "method", label: "Method", icon: '<path d="M5 3h8l3 3v11H5z"/><path d="M8 9h6M8 12h6M8 15h4"/>' },
@@ -196,7 +198,7 @@ function wireChrome() {
   addEventListener("hashchange", () => { const v = S.view, sel = S.sel; readHash(); if (v !== S.view) render(); if (sel !== S.sel) { renderInspector(); markSelection(); } });
   addEventListener("keydown", (e) => { if (e.key === "Escape" && S.sel) select(null); });
   addEventListener("scroll", hideTip, true);
-  let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (S.view === "overview") render(); }, 200); });
+  let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (S.data && !document.activeElement?.matches("input, select")) render(); }, 200); });
 }
 function readHash() {
   const m = location.hash.replace(/^#/, "").split("?");
@@ -240,7 +242,7 @@ function renderChrome() {
   const cfgAfter = c.modified && d.written_at && c.modified > d.written_at;
   fill($("statusbar"),
     h("span", { text: "Run " + runLabel(S.run) + (d.written_at ? " · written " + d.written_at.replace("T", " ") : "") }),
-    h("span", { text: d.previous ? "compared with " + d.previous : "no earlier run to compare" }),
+    h("span", { text: d.previous ? "compared with " + runLabel(d.previous) : "no earlier run to compare" }),
     h("span", { text: S.runs.length + " run" + (S.runs.length === 1 ? "" : "s") + " in history" }),
     cfgAfter ? h("span", { class: "chip warn", text: "config.toml changed after this run" }) : null,
     h("span", { class: "grow" }),
@@ -307,7 +309,7 @@ function render() {
   renderChrome();
   hideTip();
   const main = $("main");
-  const views = { overview: viewOverview, screen: viewScreen, holdings: viewHoldings, changes: viewChanges, data: viewData, method: viewMethod };
+  const views = { overview: viewOverview, screen: viewScreen, holdings: viewHoldings, lists: viewLists, changes: viewChanges, data: viewData, method: viewMethod };
   fill(main, views[S.view]());
   markSelection();
 }
@@ -475,7 +477,7 @@ function median(a) { const v = a.filter(Number.isFinite).sort((x, y) => x - y); 
 // --- swarm (1-D beeswarm of the entry score)
 function swarmChart(rows) {
   if (!rows.length) return h("div", { class: "empty", text: "No scored names in the current filter." });
-  const W = Math.max(640, Math.min(1800, $("main").clientWidth - 50)), padL = 104, padR = 16, R = 4.5, gap = 2, plotW = W - padL - padR;
+  const W = cardWidth(1), padL = 104, padR = 16, R = 4.5, gap = 2, plotW = W - padL - padR;
   const xOf = (v) => padL + (Math.max(CLIP_LO, Math.min(CLIP_HI, v)) - CLIP_LO) / (CLIP_HI - CLIP_LO) * plotW;
   const all = rows.map((r) => ({ r, v: num(r.entry_score) }));
   const over = all.filter((p) => p.v <= CLIP_LO).sort((a, b) => b.v - a.v);   // shown as one overflow marker, not as dots
@@ -534,41 +536,59 @@ function swarmChart(rows) {
 }
 
 // --- scatter: estimated vs implied growth
+// Charts are drawn at the pixel width of their card (viewBox = pixels), so 11px text stays 11px on any screen.
+// share: the card's fraction of the row when cards sit side by side (they stack below 1280px).
+function cardWidth(share = 1) {
+  const inner = $("main").clientWidth - 24;                       // .main horizontal padding
+  const avail = share < 1 && innerWidth > 1280 ? (inner - 8) * share : inner;
+  return Math.max(320, Math.floor(avail - 26));                   // card border + body padding
+}
+// marks at or beyond the score floor: a small left chevron outside the plot says "≤ −100"
+function floorChevron(svgEl, x, y) {
+  svgEl.appendChild(s("path", { d: `M${x - 7},${y} l5,-4 v8 z`, fill: "var(--fg-dim)", "pointer-events": "none" }));
+}
+
 function scatterGrowth(rows) {
   if (!rows.length) return h("div", { class: "empty", text: "No scored name has both an estimated and an implied growth rate." });
-  const W = 560, Hh = 320, pad = { l: 60, r: 16, t: 12, b: 40 };
-  const xs = rows.map((r) => num(r.est_growth)), ys = rows.map((r) => num(r.implied_growth));
-  const lo = Math.max(-0.5, Math.min(...xs, ...ys) - 0.03), hi = Math.min(0.6, Math.max(...xs, ...ys) + 0.03);
-  const step = niceStep((hi - lo) / 6);
-  const a = Math.floor(lo / step) * step, b = Math.ceil(hi / step) * step;
+  const W = cardWidth(0.5), Hh = Math.round(Math.min(440, Math.max(300, W * 0.62))), pad = { l: 56, r: 16, t: 14, b: 42 };
+  // one domain for both axes (the diagonal stays at 45°); robust to outliers, which are pinned to the edge
+  const vals = rows.flatMap((r) => [num(r.est_growth), num(r.implied_growth)]).sort((p, q) => p - q);
+  const pct = (f) => vals[Math.min(vals.length - 1, Math.max(0, Math.round(f * (vals.length - 1))))];
+  const step = niceStep((pct(0.98) - pct(0.02) + 0.1) / 6);
+  const a = Math.floor((pct(0.02) - 0.03) / step) * step, b = Math.ceil((pct(0.98) + 0.03) / step) * step;
+  const inside = (v) => v >= a && v <= b;
   const X = (v) => pad.l + (Math.max(a, Math.min(b, v)) - a) / (b - a) * (W - pad.l - pad.r);
   const Y = (v) => Hh - pad.b - (Math.max(a, Math.min(b, v)) - a) / (b - a) * (Hh - pad.t - pad.b);
   const svgEl = s("svg", { class: "chart", viewBox: `0 0 ${W} ${Hh}`, role: "img", "aria-label": "Estimated growth versus growth implied by the price" });
-  // region below the diagonal: price needs less growth than estimated
   svgEl.appendChild(s("path", { class: "zone-pos", d: `M${X(a)},${Y(a)} L${X(b)},${Y(b)} L${X(b)},${Y(a)} Z` }));
-  for (let t = a; t <= b + 1e-9; t += step) {
-    svgEl.appendChild(s("line", { class: "grid-line", x1: X(t), x2: X(t), y1: pad.t, y2: Hh - pad.b }));
-    svgEl.appendChild(s("line", { class: "grid-line", x1: pad.l, x2: W - pad.r, y1: Y(t), y2: Y(t) }));
-    svgEl.appendChild(s("text", { class: "tick-label", x: X(t), y: Hh - pad.b + 14, "text-anchor": "middle", text: fmtPct(t, 0) }));
-    if (t > a + 1e-9) svgEl.appendChild(s("text", { class: "tick-label", x: pad.l - 6, y: Y(t) + 4, "text-anchor": "end", text: fmtPct(t, 0) }));  // corner tick is labelled on the x axis
+  for (let v = a; v <= b + 1e-9; v += step) {
+    svgEl.appendChild(s("line", { class: "grid-line", x1: X(v), x2: X(v), y1: pad.t, y2: Hh - pad.b }));
+    svgEl.appendChild(s("line", { class: "grid-line", x1: pad.l, x2: W - pad.r, y1: Y(v), y2: Y(v) }));
+    svgEl.appendChild(s("text", { class: "tick-label", x: X(v), y: Hh - pad.b + 15, "text-anchor": "middle", text: fmtPct(v, 0) }));
+    if (v > a + 1e-9) svgEl.appendChild(s("text", { class: "tick-label", x: pad.l - 6, y: Y(v) + 4, "text-anchor": "end", text: fmtPct(v, 0) }));
   }
   if (a < 0 && b > 0) {
     svgEl.appendChild(s("line", { class: "axis-line", x1: X(0), x2: X(0), y1: pad.t, y2: Hh - pad.b }));
     svgEl.appendChild(s("line", { class: "axis-line", x1: pad.l, x2: W - pad.r, y1: Y(0), y2: Y(0) }));
   }
   svgEl.appendChild(s("line", { class: "ref-line", x1: X(a), y1: Y(a), x2: X(b), y2: Y(b) }));
-  svgEl.appendChild(s("text", { x: X(b) - 4, y: Y(b) + 14, "text-anchor": "end", text: "price needs the estimate" }));
-  svgEl.appendChild(s("text", { x: X(b) - 4, y: Hh - pad.b - 8, "text-anchor": "end", class: "label-strong", text: "needs less growth than estimated" }));
-  svgEl.appendChild(s("text", { x: (pad.l + W - pad.r) / 2, y: Hh - 6, "text-anchor": "middle", text: "Estimated starting growth (reasonable case)" }));
-  svgEl.appendChild(s("text", { x: 10, y: (pad.t + Hh - pad.b) / 2, "text-anchor": "middle", transform: `rotate(-90 10 ${(pad.t + Hh - pad.b) / 2})`, text: "Growth implied by the price" }));
+  // diagonal label follows the line near its lower end, where points are sparse; region label sits in its corner
+  const ang = -Math.atan2(Y(a) - Y(b), X(b) - X(a)) * 180 / Math.PI, lx = X(a + (b - a) * 0.08), ly = Y(a + (b - a) * 0.08) - 6;
+  svgEl.appendChild(s("text", { x: lx, y: ly, transform: `rotate(${ang} ${lx} ${ly})`, text: "price needs exactly the estimate" }));
+  svgEl.appendChild(s("text", { x: X(b) - 8, y: Hh - pad.b - 10, "text-anchor": "end", text: "price needs less growth than estimated" }));
+  svgEl.appendChild(s("text", { x: (pad.l + W - pad.r) / 2, y: Hh - 8, "text-anchor": "middle", text: "Estimated starting growth (reasonable case)" }));
+  svgEl.appendChild(s("text", { x: 12, y: (pad.t + Hh - pad.b) / 2, "text-anchor": "middle", transform: `rotate(-90 12 ${(pad.t + Hh - pad.b) / 2})`, text: "Growth the price implies" }));
   const surface = cssVar("--bg-card"), ink = cssVar("--fg-main");
   const colorOf = (c) => ({ operating: "var(--cls-operating)", cyclical: "var(--cls-cyclical)", financial: "var(--cls-financial)" })[c] || "var(--neutral-mark)";
+  let pinned = 0;
   for (const r of rows) {
-    const x = X(num(r.est_growth)), y = Y(num(r.implied_growth));
+    const ex = num(r.est_growth), iy = num(r.implied_growth), x = X(ex), y = Y(iy), out = !(inside(ex) && inside(iy));
+    pinned += out ? 1 : 0;
     const g = s("g", { class: "pt", "data-sym": r.symbol });
-    g.appendChild(s("circle", { class: "hit", cx: x, cy: y, r: 12 }));
-    g.appendChild(s("circle", { class: "mark", cx: x, cy: y, r: 4.5, fill: colorOf(r.class), stroke: r.owned ? ink : surface, "stroke-width": 2 }));
-    g.addEventListener("pointerenter", (e) => showTip(e, r.symbol + " · " + (r.name || ""), (r.class || "") + " · " + STATUS_LABEL[r.status], [
+    g.appendChild(s("circle", { class: "hit", cx: x, cy: y, r: 10 }));
+    g.appendChild(s("circle", { class: "mark", cx: x, cy: y, r: 4.5, fill: out ? surface : colorOf(r.class), stroke: out ? colorOf(r.class) : surface, "stroke-width": 2 }));
+    if (r.owned) g.appendChild(s("circle", { cx: x, cy: y, r: 7, fill: "none", stroke: ink, "stroke-width": 1.2, "pointer-events": "none" }));
+    g.addEventListener("pointerenter", (e) => showTip(e, r.symbol + " · " + (r.name || ""), (r.class || "") + " · " + STATUS_LABEL[r.status] + (out ? " · outside the axis range" : ""), [
       { label: "Implied growth", value: fmtPct(r.implied_growth) },
       { label: "Estimated growth", value: fmtPct(r.est_growth), color: colorOf(r.class) },
       { label: "Return on capital", value: fmtPct(r.return_on_capital) },
@@ -578,6 +598,7 @@ function scatterGrowth(rows) {
     g.addEventListener("click", () => select(r.symbol));
     svgEl.appendChild(g);
   }
+  if (pinned) svgEl.appendChild(s("text", { x: pad.l + 6, y: pad.t + 12, text: pinned + " outside the range, shown hollow at the edge" }));
   return svgEl;
 }
 function niceStep(raw) {
@@ -680,13 +701,13 @@ function entriesCard(owned) {
 }
 function entryChart(rows) {
   if (!rows.length) return h("div", { class: "empty", text: "No scored holding has a cost basis." });
-  const W = Math.max(640, Math.min(1400, $("main").clientWidth - 50)), rowH = 22, pad = { l: 96, r: 64, t: 8, b: 26 }, Hh = pad.t + rows.length * rowH + pad.b;
-  const X = (v) => pad.l + (Math.max(CLIP_LO, Math.min(CLIP_HI, v)) - CLIP_LO) / (CLIP_HI - CLIP_LO) * (W - pad.l - pad.r);
+  const W = cardWidth(1), rowH = 24, pad = { l: 96, r: 70, t: 8, b: 28 }, inset = 16, Hh = pad.t + rows.length * rowH + pad.b;
+  const X = (v) => pad.l + inset + (Math.max(CLIP_LO, Math.min(CLIP_HI, v)) - CLIP_LO) / (CLIP_HI - CLIP_LO) * (W - pad.l - inset - pad.r);
   const svgEl = s("svg", { class: "chart", viewBox: `0 0 ${W} ${Hh}`, role: "img", "aria-label": "Entry score at your cost and today" });
   svgEl.appendChild(s("rect", { class: "zone-pos", x: X(0), y: pad.t, width: X(CLIP_HI) - X(0), height: Hh - pad.t - pad.b }));
-  for (const t of TICKS) {
-    svgEl.appendChild(s("line", { class: t === 0 ? "zero-line" : "grid-line", x1: X(t), x2: X(t), y1: pad.t, y2: Hh - pad.b }));
-    svgEl.appendChild(s("text", { class: "tick-label", x: X(t), y: Hh - 8, "text-anchor": "middle", text: fmtTick(t) }));
+  for (const v of TICKS) {
+    svgEl.appendChild(s("line", { class: v === 0 ? "zero-line" : "grid-line", x1: X(v), x2: X(v), y1: pad.t, y2: Hh - pad.b }));
+    svgEl.appendChild(s("text", { class: "tick-label", x: X(v), y: Hh - 9, "text-anchor": "middle", text: v === CLIP_LO ? "≤ −100" : fmtTick(v) }));
   }
   const surface = cssVar("--bg-card");
   rows.forEach((r, i) => {
@@ -694,11 +715,13 @@ function entryChart(rows) {
     const color = b >= 0 ? "var(--pos)" : "var(--neg)";
     const g = s("g", { class: "pt", "data-sym": r.symbol });
     g.appendChild(s("rect", { class: "hit", x: 0, y: y - rowH / 2, width: W, height: rowH }));
-    g.appendChild(s("text", { x: pad.l - 8, y: y + 4, "text-anchor": "end", class: "label-strong", text: r.symbol }));
-    g.appendChild(s("line", { x1: X(a), x2: X(b), y1: y, y2: y, stroke: "var(--neutral-mark)", "stroke-width": 2, "stroke-linecap": "round" }));
-    g.appendChild(s("circle", { cx: X(a), cy: y, r: 4, fill: surface, stroke: "var(--fg-dim)", "stroke-width": 2 }));
+    g.appendChild(s("text", { x: pad.l - 10, y: y + 4, "text-anchor": "end", class: "label-strong", text: r.symbol }));
+    if (Math.abs(X(a) - X(b)) > 1) g.appendChild(s("line", { x1: X(a), x2: X(b), y1: y, y2: y, stroke: "var(--neutral-mark)", "stroke-width": 2, "stroke-linecap": "round" }));
+    if (a <= CLIP_LO || b <= CLIP_LO) floorChevron(g, X(CLIP_LO) - 4, y);
     g.appendChild(s("circle", { class: "mark", cx: X(b), cy: y, r: 4.5, fill: color, stroke: surface, "stroke-width": 2 }));
-    g.appendChild(s("text", { class: "tick-label", x: W - pad.r + 8, y: y + 4, text: fmtEurK(r.position_eur) }));
+    // the cost ring is drawn last and unfilled, so it never hides today's dot when the two are close
+    g.appendChild(s("circle", { cx: X(a), cy: y, r: 5.5, fill: "none", stroke: "var(--fg-dim)", "stroke-width": 1.6 }));
+    g.appendChild(s("text", { class: "tick-label", x: W - pad.r + 10, y: y + 4, text: fmtEurK(r.position_eur) }));
     g.addEventListener("pointerenter", (e) => showTip(e, r.symbol + " · " + (r.name || ""), "", [
       { label: "Score at your cost", value: fmtScore(a) }, { label: "Score today", value: fmtScore(b), color },
       { label: "Your avg cost", value: fmtPx(r.cost_px) + " " + (r.quote_ccy || "") }, { label: "Price", value: fmtPx(r.price) + " " + (r.quote_ccy || "") },
@@ -744,9 +767,9 @@ function viewChanges() {
     kpi("Newly rankable", String(ev("newly rankable").length), null),
     kpi("No longer rankable", String(ev("no longer rankable").length), null, { status: "not rankable" }),
     kpi("Added / removed", ev("new in universe").length + " / " + removed.length, null)));
-  const movers = rows.filter((r) => ok(r.score_change)).sort((a, b) => Math.abs(num(b.score_change)) - Math.abs(num(a.score_change)));
+  const movers = rows.filter((r) => ok(r.score_change) && Math.abs(num(r.score_change)) >= 1).sort((a, b) => Math.abs(num(b.score_change)) - Math.abs(num(a.score_change)));
   out.push(h("div", { class: "grid two" },
-    card("Biggest score moves", "top 15 by absolute change", dumbbell(movers.slice(0, 15)), {
+    card("Biggest score moves", movers.length ? "top " + Math.min(15, movers.length) + " of " + movers.length : "", dumbbell(movers.slice(0, 15)), {
       right: legend([["dot", "var(--cls-operating)", "Price moved more"], ["dot", "var(--cls-cyclical)", "Ceiling moved more"], ["hollow", "var(--fg-dim)", "Previous run"]]),
       foot: "Driver: whichever moved more in relative terms, the price or the ceiling." }),
     card("Status events", "", table(rows.filter((r) => r.event), [C.symbol, C.name,
@@ -759,7 +782,7 @@ function viewChanges() {
     { key: "price_change", label: "Price Δ", num: true, fmt: (r) => fmtSignedPct(r.price_change), sort: (r) => num(r.price_change) },
     { key: "ceiling_change", label: "Ceiling Δ", num: true, fmt: (r) => fmtSignedPct(r.ceiling_change), sort: (r) => num(r.ceiling_change) }];
   out.push(h("section", { class: "card" }, h("div", { class: "card-head" }, h("h3", { text: "All changes" }), null),
-    h("div", { class: "card-body flush" }, table(rows.filter((r) => ok(r.score_change) || r.event), changeCols, S.changeSort))));
+    h("div", { class: "card-body flush" }, table(rows.filter((r) => (ok(r.score_change) && Math.abs(num(r.score_change)) >= 0.5) || r.event), changeCols, S.changeSort, { empty: "No score moved and no status changed between these runs." }))));
   if (removed.length) out.push(card("Removed since " + S.data.previous, removed.length + " names", h("ul", { class: "flags" },
     removed.map((r) => h("li", { text: r.symbol + " · " + (r.name || "") + (ok(r.entry_score) ? " (score was " + fmtScore(r.entry_score) + ")" : "") })))));
   return out;
@@ -767,28 +790,30 @@ function viewChanges() {
 function runHistory() {
   const runs = S.runs.filter((r) => !r.error);
   if (runs.length < 2) return h("div", { class: "empty", text: "One run so far: history starts with the next weekly run." });
-  const W = 520, Hh = 150, pad = { l: 40, r: 12, t: 12, b: 26 };
-  const mk = (title, vals, fmt, kind) => {
+  const short = (run) => { const n = String(run).split("_")[1]; return runDay(run).slice(5) + (n ? " #" + (Number(n) + 1) : ""); };
+  const W = innerWidth > 1280 ? Math.floor((cardWidth(1) - 8) / 2) : cardWidth(1), Hh = 170, pad = { l: 48, r: 12, t: 14, b: 28 };
+  const mk = (title, vals, fmt, kind, floor0) => {
     const v = vals.filter(Number.isFinite);
-    let lo = Math.min(0, ...v), hi = Math.max(...v, 1);
+    let lo = floor0 ? 0 : Math.min(0, ...v), hi = Math.max(...v, floor0 ? 1 : 0);
     const step = niceStep((hi - lo) / 4 || 1); lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
-    const X = (i) => pad.l + (runs.length === 1 ? 0.5 : i / (runs.length - 1)) * (W - pad.l - pad.r);
-    const bw = Math.min(24, (W - pad.l - pad.r) / runs.length * 0.6);
-    const Y = (x) => Hh - pad.b - (x - lo) / (hi - lo) * (Hh - pad.t - pad.b);
+    const band = (W - pad.l - pad.r) / runs.length, X = (i) => pad.l + (i + 0.5) * band;   // band centres: nothing clips
+    const bw = Math.min(28, band * 0.55);
+    const Y = (x) => Hh - pad.b - (x - lo) / (hi - lo || 1) * (Hh - pad.t - pad.b);
     const svgEl = s("svg", { class: "chart", viewBox: `0 0 ${W} ${Hh}`, role: "img", "aria-label": title });
     for (let t = lo; t <= hi + 1e-9; t += step) {
       svgEl.appendChild(s("line", { class: t === 0 ? "axis-line" : "grid-line", x1: pad.l, x2: W - pad.r, y1: Y(t), y2: Y(t) }));
-      svgEl.appendChild(s("text", { class: "tick-label", x: pad.l - 6, y: Y(t) + 4, "text-anchor": "end", text: fmt(t) }));
+      svgEl.appendChild(s("text", { class: "tick-label", x: pad.l - 8, y: Y(t) + 4, "text-anchor": "end", text: fmt(t) }));
     }
-    const every = Math.ceil(runs.length / 8);
-    runs.forEach((r, i) => { if (i % every === 0 || i === runs.length - 1) svgEl.appendChild(s("text", { class: "tick-label", x: X(i), y: Hh - 8, "text-anchor": "middle", text: runLabel(r.date).slice(5) })); });
+    const every = Math.max(1, Math.ceil(runs.length / Math.max(2, Math.floor((W - pad.l) / 70))));
+    runs.forEach((r, i) => { if (i % every === 0 || i === runs.length - 1) svgEl.appendChild(s("text", { class: "tick-label", x: X(i), y: Hh - 9, "text-anchor": "middle", text: short(r.date) })); });
+    const tip = (e, r, i, color) => showTip(e, runLabel(r.date), title, [{ label: title, value: fmt(vals[i]), color }]);
     if (kind === "bar") runs.forEach((r, i) => {
       if (!Number.isFinite(vals[i])) return;
-      const y = Y(Math.max(0, vals[i])), y0 = Y(0);
-      const rect = s("path", { class: "mark", fill: r.date === S.run ? "var(--pos)" : "var(--neutral-mark)", d: roundTopBar(X(i) - bw / 2, y, bw, y0 - y, 4) });
-      rect.addEventListener("pointerenter", (e) => showTip(e, r.date, title, [{ label: title, value: fmt(vals[i]) }]));
-      rect.addEventListener("pointermove", moveTip); rect.addEventListener("pointerleave", hideTip);
-      svgEl.appendChild(rect);
+      const y = Y(Math.max(0, vals[i])), y0 = Y(0), color = r.date === S.run ? "var(--pos)" : "var(--neutral-mark)";
+      const bar = s("path", { class: "mark", fill: color, d: roundTopBar(X(i) - bw / 2, y, bw, y0 - y, 4) });
+      bar.addEventListener("pointerenter", (e) => tip(e, r, i, color));
+      bar.addEventListener("pointermove", moveTip); bar.addEventListener("pointerleave", hideTip);
+      svgEl.appendChild(bar);
     });
     else {
       const d = runs.map((r, i) => Number.isFinite(vals[i]) ? (i ? "L" : "M") + X(i) + "," + Y(vals[i]) : "").join(" ");
@@ -798,7 +823,7 @@ function runHistory() {
         const g = s("g", { class: "pt" });
         g.appendChild(s("circle", { class: "hit", cx: X(i), cy: Y(vals[i]), r: 12 }));
         g.appendChild(s("circle", { class: "mark", cx: X(i), cy: Y(vals[i]), r: 4, fill: "var(--pos)", stroke: cssVar("--bg-card"), "stroke-width": 2 }));
-        g.addEventListener("pointerenter", (e) => showTip(e, r.date, title, [{ label: title, value: fmt(vals[i]), color: "var(--pos)" }]));
+        g.addEventListener("pointerenter", (e) => tip(e, r, i, "var(--pos)"));
         g.addEventListener("pointermove", moveTip); g.addEventListener("pointerleave", hideTip);
         svgEl.appendChild(g);
       });
@@ -806,8 +831,8 @@ function runHistory() {
     return h("div", {}, h("div", { class: "small dim", text: title, style: { marginBottom: "4px" } }), svgEl);
   };
   return h("div", { class: "grid halves" },
-    mk("Candidates per run", runs.map((r) => r.candidates), (x) => fmtNum(x, 0), "bar"),
-    mk("Median entry score", runs.map((r) => num(r.median_score)), (x) => fmtScore(x), "line"));
+    mk("Candidates per run", runs.map((r) => r.candidates), (x) => fmtNum(x, 0), "bar", true),
+    mk("Median entry score", runs.map((r) => num(r.median_score)), (x) => x <= CLIP_LO ? "≤ −100" : fmtTick(x), "line", false));
 }
 function roundTopBar(x, y, w, hgt, r) {
   if (hgt <= 0) return "";
@@ -815,13 +840,13 @@ function roundTopBar(x, y, w, hgt, r) {
   return `M${x},${y + hgt} V${y + r} Q${x},${y} ${x + r},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${y + hgt} Z`;
 }
 function dumbbell(rows) {
-  if (!rows.length) return h("div", { class: "empty", text: "No name has a score in both runs." });
-  const W = 640, rowH = 24, pad = { l: 92, r: 52, t: 8, b: 26 }, Hh = pad.t + rows.length * rowH + pad.b;
-  const X = (v) => pad.l + (Math.max(CLIP_LO, Math.min(CLIP_HI, v)) - CLIP_LO) / (CLIP_HI - CLIP_LO) * (W - pad.l - pad.r);
+  if (!rows.length) return h("div", { class: "empty", text: "No score moved by a point or more between these runs." });
+  const W = cardWidth(0.6), rowH = 24, pad = { l: 92, r: 56, t: 8, b: 28 }, inset = 16, Hh = pad.t + rows.length * rowH + pad.b;
+  const X = (v) => pad.l + inset + (Math.max(CLIP_LO, Math.min(CLIP_HI, v)) - CLIP_LO) / (CLIP_HI - CLIP_LO) * (W - pad.l - inset - pad.r);
   const svgEl = s("svg", { class: "chart", viewBox: `0 0 ${W} ${Hh}`, role: "img", "aria-label": "Entry score before and after" });
-  for (const t of TICKS) {
-    svgEl.appendChild(s("line", { class: t === 0 ? "zero-line" : "grid-line", x1: X(t), x2: X(t), y1: pad.t, y2: Hh - pad.b }));
-    svgEl.appendChild(s("text", { class: "tick-label", x: X(t), y: Hh - 8, "text-anchor": "middle", text: fmtTick(t) }));
+  for (const v of TICKS) {
+    svgEl.appendChild(s("line", { class: v === 0 ? "zero-line" : "grid-line", x1: X(v), x2: X(v), y1: pad.t, y2: Hh - pad.b }));
+    if (v % 50 === 0) svgEl.appendChild(s("text", { class: "tick-label", x: X(v), y: Hh - 9, "text-anchor": "middle", text: v === CLIP_LO ? "≤ −100" : fmtTick(v) }));
   }
   const surface = cssVar("--bg-card");
   rows.forEach((r, i) => {
@@ -830,11 +855,12 @@ function dumbbell(rows) {
     const color = r.reason === "price" ? "var(--cls-operating)" : "var(--cls-cyclical)";
     const g = s("g", { class: "pt", "data-sym": r.symbol });
     g.appendChild(s("rect", { class: "hit", x: 0, y: y - rowH / 2, width: W, height: rowH }));
-    g.appendChild(s("text", { x: pad.l - 8, y: y + 4, "text-anchor": "end", class: "label-strong", text: r.symbol }));
+    g.appendChild(s("text", { x: pad.l - 10, y: y + 4, "text-anchor": "end", class: "label-strong", text: r.symbol }));
     g.appendChild(s("line", { x1: X(a), x2: X(b), y1: y, y2: y, stroke: color, "stroke-width": 2, "stroke-linecap": "round" }));
-    g.appendChild(s("circle", { cx: X(a), cy: y, r: 4, fill: surface, stroke: color, "stroke-width": 2 }));
+    if (a <= CLIP_LO || b <= CLIP_LO) floorChevron(g, X(CLIP_LO) - 4, y);
     g.appendChild(s("circle", { class: "mark", cx: X(b), cy: y, r: 4.5, fill: color, stroke: surface, "stroke-width": 2 }));
-    g.appendChild(s("text", { class: "tick-label", x: W - pad.r + 8, y: y + 4, text: fmtScore(r.score_change) }));
+    g.appendChild(s("circle", { cx: X(a), cy: y, r: 5, fill: "none", stroke: color, "stroke-width": 1.6 }));
+    g.appendChild(s("text", { class: "tick-label", x: W - pad.r + 10, y: y + 4, text: fmtScore(r.score_change) }));
     g.addEventListener("pointerenter", (e) => showTip(e, r.symbol + " · " + (r.name || ""), "driver: " + (r.reason || "–"), [
       { label: "Score before", value: fmtScore(a) }, { label: "Score now", value: fmtScore(b), color },
       { label: "Price change", value: fmtSignedPct(r.price_change) }, { label: "Ceiling change", value: fmtSignedPct(r.ceiling_change) }]));
@@ -888,6 +914,289 @@ function flagBars(entries, total) {
     h("span", { class: "name", title: f, style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, isCritical(f) ? h("span", { class: "chip warn", text: "critical", style: { marginRight: "6px" } }) : null, f),
     h("span", { class: "track" }, h("span", { class: "bar", style: { width: n / max * 100 + "%", background: isCritical(f) ? "var(--warning-accent)" : "var(--neutral-mark)" } })),
     h("span", { class: "num", text: String(n), title: fmtPct(n / total, 0) + " of names" }))));
+}
+
+// ---------------------------------------------------------------- Lists (watchlist + holdings editor, Yahoo search, rerun)
+const L = { tab: "watchlist", data: null, rows: null, removed: null, review: null, reviewed: null, busy: false, notice: null,
+  q: "", results: [], searching: false, searchErr: null, filter: "", job: null, poll: null, seq: 0 };
+const LIST_COLS = {
+  watchlist: [["yahoo_symbol", "Yahoo symbol", "text", "7.5em"], ["symbol", "Symbol", "text", "6em"], ["name", "Name", "text", "16em"],
+    ["isin", "ISIN", "text", "9em"], ["lists", "Lists", "text", "11em"]],
+  holdings: [["yahoo_symbol", "Yahoo symbol", "text", "7.5em"], ["isin", "ISIN", "text", "9em"], ["name", "Name", "text", "14em"],
+    ["shares", "Shares", "num", "6em"], ["avg_cost", "Avg cost €/share", "num", "7em"], ["value_eur", "Value €", "num", "7em"]],
+};
+const LIST_FIELDS = { watchlist: ["symbol", "name", "isin", "yahoo_symbol", "lists"],
+  holdings: ["isin", "symbol", "name", "yahoo_symbol", "shares", "avg_cost", "value_eur"] };
+
+async function postJSON(url, body) {
+  let r;
+  try {
+    r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": (S.config || {}).csrf || "" }, body: JSON.stringify(body) });
+  } catch (err) {  // server stopped or unreachable: report it instead of leaving the editor busy forever
+    return { ok: false, errors: ["Could not reach the dashboard server (" + err.message + "). Is it still running?"], changes: [] };
+  }
+  const out = await r.json().catch(() => ({ ok: false, errors: [r.statusText], changes: [] }));
+  if (!r.ok && !out.errors) out.errors = [out.error || r.statusText];
+  out.status = r.status;
+  return out;
+}
+const listKey = (kind, r) => String((kind === "watchlist" ? (r.yahoo_symbol || r.symbol || r.isin) : (r.isin || r.yahoo_symbol || r.symbol)) || "").toUpperCase();
+const snapshot = (kind, r) => JSON.stringify(LIST_FIELDS[kind].map((f) => r[f] ?? ""));
+function toEditRow(kind, r) {
+  const row = { ...r, _id: ++L.seq };
+  if (kind === "holdings") {
+    row.avg_cost = ok(r.cost_eur) && num(r.shares) > 0 ? +(num(r.cost_eur) / num(r.shares)).toFixed(6) : null;
+    row._basis = [row.shares, row.avg_cost];  // the stored cost_eur is sent back untouched unless these change
+  }
+  row._orig = snapshot(kind, row);
+  return row;
+}
+async function loadLists() {
+  try { L.data = await getJSON("api/inputs"); } catch (e) { L.data = { error: e.message }; return; }
+  L.rows = {}; L.removed = { watchlist: new Set(), holdings: new Set() };
+  for (const kind of ["watchlist", "holdings"]) L.rows[kind] = (L.data[kind]?.rows || []).map((r) => toEditRow(kind, r));
+  L.review = null; L.reviewed = null;
+  if (!L.job) {  // a run may already be going (started from another tab or device)
+    try { const j = await getJSON("api/rerun"); if (j.running) { L.job = j; pollRun(); } } catch (e) { /* status is optional */ }
+  }
+}
+function listDirty(kind) {
+  if (!L.rows) return 0;
+  return L.rows[kind].filter((r) => !r._orig || r._orig !== snapshot(kind, r)).length + L.removed[kind].size;
+}
+function listPayload(kind) {
+  return L.rows[kind].filter((r) => !L.removed[kind].has(r._id)).map((r) => {
+    const o = {};
+    for (const f of LIST_FIELDS[kind]) if (f !== "avg_cost") o[f] = r[f] ?? "";
+    if (kind === "holdings") {
+      o.shares = ok(r.shares) ? num(r.shares) : null;
+      o.value_eur = ok(r.value_eur) ? num(r.value_eur) : null;
+      const untouched = r._basis && r._basis[0] === r.shares && r._basis[1] === r.avg_cost;
+      o.cost_eur = untouched ? (ok(r.cost_eur) ? num(r.cost_eur) : null)
+        : ok(r.shares) && ok(r.avg_cost) ? +(num(r.shares) * num(r.avg_cost)).toFixed(2) : null;
+    }
+    return o;
+  });
+}
+function latestFor(kind, r) {
+  const resolved = (L.data && L.data.resolved) || {};
+  if (!S.bySym) return null;
+  const ysym = r.yahoo_symbol || resolved[kind === "watchlist" ? (r.symbol || r.isin) : (r.isin || r.symbol)] || resolved[r.symbol] || "";
+  // holdings that merged into a watchlist row by name are found through the ISIN the run records for owned names
+  return S.bySym.get(ysym) || (r.isin && S.byIsin.get(String(r.isin).toUpperCase())) || S.bySym.get(r.symbol) || null;
+}
+
+function viewLists() {
+  if (!L.data) { loadLists().then(() => { if (S.view === "lists") render(); }); return [pageHeader("Lists"), h("div", { class: "empty", text: "Loading…" })]; }
+  if (L.data.error) return [pageHeader("Lists"), h("div", { class: "banner err" }, h("div", { text: "Could not load the input lists: " + L.data.error }))];
+  const editable = !!L.data.editable, kind = L.tab;
+  const tabs = h("div", { class: "segmented", role: "group", "aria-label": "List" }, ["watchlist", "holdings"].map((k) => {
+    const n = L.rows[k].length - L.removed[k].size, d = listDirty(k);
+    return h("button", { "aria-pressed": String(L.tab === k), onclick: () => { L.tab = k; L.review = null; L.reviewed = null; render(); } },
+      (k === "watchlist" ? "Watchlist" : "Holdings") + " · " + n, d ? h("span", { class: "dirty-dot", title: d + " unsaved change" + (d === 1 ? "" : "s") }) : null);
+  }));
+  const running = L.job && L.job.running;
+  const runBtn = h("button", { class: "btn", disabled: !editable || running, onclick: startRun, title: "Run the screener now with the saved lists" },
+    icon('<path d="M6 4l10 6-10 6z"/>'), running ? "Running…" : "Run screener now");
+  const out = [pageHeader("Lists", "", tabs, runBtn)];
+  if (!editable) out.push(h("div", { class: "banner" }, icon('<rect x="4" y="9" width="12" height="8" rx="1.5"/><path d="M7 9V6a3 3 0 0 1 6 0v3"/>'),
+    h("div", { text: "View only: the lists can be edited on the machine running the dashboard (http://127.0.0.1:8765)." })));
+  if (L.notice) out.push(h("div", { class: "banner " + (L.notice.kind === "ok" ? "ok" : "warn") },
+    icon(L.notice.kind === "ok" ? '<path d="M4 10l4 4 8-8"/>' : '<path d="M10 3l7.5 13h-15z"/><path d="M10 8v4M10 14.2v.3"/>'), h("div", { text: L.notice.text })));
+  if (L.job && (L.job.running || L.job.log?.length)) out.push(jobCard());
+  if (editable) out.push(searchCard(kind));
+  out.push(listTableCard(kind, editable));
+  if (editable) out.push(listSaveBar(kind));
+  return out;
+}
+
+function searchCard(kind) {
+  const input = h("input", { type: "search", value: L.q, placeholder: "Company name, ticker or ISIN", "aria-label": "Search Yahoo Finance", style: { width: "min(420px, 100%)" } });
+  let t;
+  input.addEventListener("input", (e) => {
+    L.q = e.target.value; clearTimeout(t);
+    t = setTimeout(() => runSearch(kind), 350);
+  });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(t); runSearch(kind); } });
+  return card("Add from Yahoo Finance", "", h("div", {},
+    h("div", { class: "search-row" }, input, h("span", { class: "small dim", id: "search-state", text: L.searching ? "Searching…" : "" })),
+    h("div", { id: "search-results" }, searchResults(kind))), {});
+}
+async function runSearch(kind) {
+  const q = L.q.trim();
+  if (!q) { L.results = []; L.searchErr = null; return paintSearch(kind); }
+  L.searching = true; paintSearch(kind);
+  try {
+    const r = await fetch("api/search?q=" + encodeURIComponent(q), { cache: "no-store" });
+    const body = await r.json();
+    if (q !== L.q.trim()) return;                    // a newer query is on its way
+    L.results = body.results || []; L.searchErr = body.error || null;
+  } catch (e) { L.results = []; L.searchErr = "Search failed: " + e.message; }
+  L.searching = false; paintSearch(kind);
+}
+function paintSearch(kind) {
+  const box = $("search-results"), st = $("search-state");
+  if (st) st.textContent = L.searching ? "Searching…" : "";
+  if (box) fill(box, searchResults(kind));
+}
+function searchResults(kind) {
+  if (L.searchErr) return h("div", { class: "banner warn", style: { marginTop: "8px" } }, h("div", { text: L.searchErr }));
+  if (!L.q.trim()) return h("div", { class: "small dim", style: { marginTop: "6px" }, text: "Results come straight from Yahoo Finance; pick the listing (exchange) you want screened." });
+  if (!L.results.length) return L.searching ? null : h("div", { class: "small dim", style: { marginTop: "6px" }, text: "No listing found." });
+  const have = (k, sym) => L.rows[k].some((r) => !L.removed[k].has(r._id) && [r.yahoo_symbol, r.symbol].some((x) => String(x || "").toUpperCase() === sym.toUpperCase()));
+  return h("table", { class: "data dense", style: { marginTop: "8px" } },
+    h("thead", {}, h("tr", {}, ["Symbol", "Name", "Exchange", "Type", "Sector", ""].map((x) => h("th", { text: x })))),
+    h("tbody", {}, L.results.map((x) => h("tr", {},
+      h("td", {}, h("span", { class: "sym", text: x.symbol })), h("td", { class: "name", text: x.name, title: x.name }),
+      h("td", { text: x.exchange }), h("td", { text: x.type }), h("td", { class: "dim", text: x.sector || "–" }),
+      h("td", { class: "actions" },
+        have("watchlist", x.symbol) ? h("span", { class: "chip", text: "on watchlist" })
+          : h("button", { class: "btn", onclick: () => addFromSearch("watchlist", x) }, icon('<path d="M10 5v10M5 10h10"/>'), "Watchlist"),
+        have("holdings", x.symbol) ? h("span", { class: "chip", text: "in holdings" })
+          : h("button", { class: "btn", onclick: () => addFromSearch("holdings", x) }, icon('<path d="M10 5v10M5 10h10"/>'), "Holding"))))));
+}
+function addFromSearch(kind, x) {
+  const row = kind === "watchlist"
+    ? { symbol: x.symbol, yahoo_symbol: x.symbol, name: x.name, isin: "", lists: "" }
+    : { isin: "", symbol: x.symbol, yahoo_symbol: x.symbol, name: x.name, shares: null, avg_cost: null, value_eur: null };
+  const r = { ...row, _id: ++L.seq, _orig: null };
+  L.rows[kind].unshift(r);
+  L.tab = kind; L.review = null; L.reviewed = null; L.notice = null;
+  render();
+  if (kind === "holdings") setTimeout(() => document.querySelector(`tr[data-row="${r._id}"] input[data-f="shares"]`)?.focus(), 0);
+}
+
+function listTableCard(kind, editable) {
+  const cols = LIST_COLS[kind];
+  const filter = h("input", { type: "search", placeholder: "Filter", value: L.filter, "aria-label": "Filter rows", style: { width: "180px" } });
+  filter.addEventListener("input", (e) => { L.filter = e.target.value; const b = $("list-body"); if (b) fill(b, listRows(kind, editable)); });
+  const total = L.rows[kind].length - L.removed[kind].size;
+  return h("section", { class: "card" },
+    h("div", { class: "card-head" }, h("h3", { text: kind === "watchlist" ? "Watchlist" : "Holdings" }),
+      h("span", { class: "hint", text: total + (kind === "watchlist" ? " companies" : " positions") + " · " + (L.data[kind]?.path || "") }),
+      h("div", { class: "right" }, filter, editable ? h("button", { class: "btn ghost", onclick: () => addBlank(kind) }, icon('<path d="M10 5v10M5 10h10"/>'), "Empty row") : null)),
+    h("div", { class: "card-body flush" }, h("div", { class: "table-wrap" }, h("table", { class: "data dense edit" },
+      h("thead", {}, h("tr", {}, cols.map(([, label, type, w]) => h("th", { class: type === "num" ? "num" : "", style: { minWidth: w }, text: label })),
+        kind === "holdings" ? h("th", { class: "num", text: "Cost €" }) : null, h("th", { text: "Latest run" }), h("th", { text: "" }))),
+      h("tbody", { id: "list-body" }, listRows(kind, editable))))),
+    kind === "holdings" ? h("div", { class: "card-foot", text: "Value € left empty is computed by each run as shares × today's price. Changing shares clears an imported value." }) : null);
+}
+function addBlank(kind) {
+  const blank = Object.fromEntries(LIST_FIELDS[kind].map((f) => [f, ["shares", "avg_cost", "value_eur"].includes(f) ? null : ""]));
+  L.rows[kind].unshift({ ...blank, _id: ++L.seq, _orig: null });
+  L.review = null; L.reviewed = null; render();
+  setTimeout(() => document.querySelector("#list-body tr input")?.focus(), 0);
+}
+function listRows(kind, editable) {
+  const f = L.filter.trim().toLowerCase();
+  const rows = L.rows[kind].filter((r) => !f || LIST_FIELDS[kind].some((k) => String(r[k] ?? "").toLowerCase().includes(f)));
+  if (!rows.length) return h("tr", {}, h("td", { colspan: "9", class: "empty", text: f ? "No row matches the filter." : "Empty: add companies with the search above." }));
+  return rows.map((r) => {
+    const removed = L.removed[kind].has(r._id);
+    const tr = h("tr", { "data-row": String(r._id), class: rowState(kind, r, removed) });
+    for (const [field, , type] of LIST_COLS[kind]) {
+      const val = r[field] ?? "";
+      const dp = { shares: 6, avg_cost: 4, value_eur: 2 }[field] ?? 6;  // display only: unedited values are saved exactly
+      const inp = h("input", { type: type === "num" ? "number" : "text", value: type === "num" && val !== "" && val !== null ? String(+(+val).toFixed(dp)) : String(val),
+        "data-f": field, disabled: !editable || removed, step: "any", min: type === "num" ? "0" : null, "aria-label": field + " " + (listKey(kind, r) || "new row"),
+        placeholder: field === "value_eur" ? "auto" : field === "yahoo_symbol" ? (latestFor(kind, r)?.symbol || "") : "" });
+      inp.addEventListener("input", (e) => {
+        const v = e.target.value;
+        r[field] = type === "num" ? (v === "" ? null : Number(v)) : v;
+        if (kind === "holdings" && field === "shares" && ok(r.value_eur)) {  // an imported value no longer matches
+          r.value_eur = null; const vi = tr.querySelector('input[data-f="value_eur"]'); if (vi) vi.value = "";
+        }
+        if (kind === "holdings") { const c = tr.querySelector(".cost-cell"); if (c) c.textContent = costText(r); }
+        tr.className = rowState(kind, r, false); L.review = null; L.reviewed = null; paintSaveBar(kind);
+      });
+      tr.appendChild(h("td", { class: type === "num" ? "num" : "" }, inp));
+    }
+    if (kind === "holdings") tr.appendChild(h("td", { class: "num cost-cell", text: costText(r) }));
+    const latest = latestFor(kind, r);
+    tr.appendChild(h("td", {}, latest ? h("span", { class: "latest" }, statusEl(latest.status), ok(latest.entry_score) ? h("span", { class: "num", text: fmtScore(latest.entry_score) }) : null)
+      : h("span", { class: "dim small", text: !r._orig ? "new" : isSkipped(r) ? "skipped (fund / ETF)" : "not in the latest run" })));
+    tr.appendChild(h("td", { class: "actions" }, editable ? h("button", { class: "btn ghost", title: removed ? "Keep" : "Remove", "aria-label": (removed ? "Keep " : "Remove ") + (listKey(kind, r) || "row"),
+      onclick: () => { if (!r._orig) L.rows[kind] = L.rows[kind].filter((x) => x._id !== r._id); else if (removed) L.removed[kind].delete(r._id); else L.removed[kind].add(r._id); L.review = null; L.reviewed = null; render(); } },
+      icon(removed ? '<path d="M4 10l4 4 8-8"/>' : '<path d="M5 5l10 10M15 5L5 15"/>')) : null));
+    return tr;
+  });
+}
+const isSkipped = (r) => { const res = (L.data && L.data.resolved) || {}; return [r.isin, r.symbol, r.yahoo_symbol].some((k) => k && String(res[k] || "").toUpperCase() === "SKIP"); };
+const costText = (r) => ok(r.shares) && ok(r.avg_cost) ? fmtEur(num(r.shares) * num(r.avg_cost)) : "–";
+const rowState = (kind, r, removed) => removed ? "removed" : !r._orig ? "added" : r._orig !== snapshot(kind, r) ? "changed" : "";
+
+function listSaveBar(kind) {
+  return h("div", { id: "list-savebar" }, saveBarBody(kind));
+}
+function paintSaveBar(kind) { const el = $("list-savebar"); if (el) fill(el, saveBarBody(kind)); }
+function saveBarBody(kind) {
+  const d = listDirty(kind), rv = L.review, body = [];
+  if (rv) {
+    if (rv.errors && rv.errors.length) body.push(h("div", { class: "banner err" }, h("div", {}, h("div", { text: "Not saved:" }), h("ul", {}, rv.errors.map((x) => h("li", { text: x }))))));
+    if (rv.ok) {
+      const parts = [["added", rv.diff.added], ["removed", rv.diff.removed], ["changed", rv.diff.changed]].filter(([, v]) => v.length);
+      body.push(parts.length ? h("ul", { class: "diff" }, parts.map(([k, v]) => h("li", {}, h("span", { class: "dim", text: k + ": " }), v.slice(0, 30).join(", ") + (v.length > 30 ? " … +" + (v.length - 30) : ""))))
+        : h("div", { class: "dim", text: "No differences to the saved file." }));
+    }
+  }
+  return card("Save " + (kind === "watchlist" ? "watchlist" : "holdings"), d ? d + " unsaved change" + (d === 1 ? "" : "s") : "no unsaved changes", h("div", {}, body,
+    h("div", { class: "editbar" },
+      h("button", { class: "btn", disabled: L.busy || !d, onclick: () => reviewList(kind) }, "Review changes"),
+      h("button", { class: "btn primary", disabled: L.busy || !(rv && rv.ok && Object.values(rv.diff).some((v) => v.length)), onclick: () => saveList(kind) }, "Save"),
+      h("button", { class: "btn ghost", disabled: L.busy || !d, onclick: async () => { await loadLists(); L.notice = null; render(); } }, "Discard"),
+      L.busy ? h("span", { class: "dim small", text: "working…" }) : null)),
+  { foot: "Saving keeps a dated copy of the previous file under data/input-history/. New names are scored by the next run." });
+}
+async function reviewList(kind) {
+  const body = { kind, rows: listPayload(kind), base_sha: L.data[kind].sha };
+  L.busy = true; paintSaveBar(kind);
+  L.review = await postJSON("api/inputs", { ...body, dry_run: true });
+  L.reviewed = JSON.stringify(body); L.busy = false; paintSaveBar(kind);
+}
+async function saveList(kind) {
+  const now = JSON.stringify({ kind, rows: listPayload(kind), base_sha: L.data[kind].sha });
+  if (now !== L.reviewed) { await reviewList(kind); L.notice = { kind: "warn", text: "The rows changed after the review, so they were reviewed again. Check the list, then save." }; return render(); }
+  L.busy = true; paintSaveBar(kind);
+  const res = await postJSON("api/inputs", JSON.parse(L.reviewed));
+  L.busy = false;
+  if (res.ok && res.written) {
+    await loadLists();
+    L.notice = { kind: "ok", text: "Saved " + (kind === "watchlist" ? "the watchlist" : "the holdings") + ". Run the screener to score the changes (or wait for the weekly run)." };
+  } else {
+    L.review = res;
+    if (res.conflict) L.notice = { kind: "warn", text: "The file was changed elsewhere since this page loaded it. Discard, then redo the edit." };
+  }
+  render();
+}
+
+// ---------- run the screener from the dashboard
+function jobCard() {
+  const j = L.job || {};
+  const state = j.running ? "running since " + (j.started || "").replace("T", " ") : j.code === 0 ? "finished " + (j.finished || "").replace("T", " ") : "failed (exit " + j.code + ")";
+  return h("section", { class: "card", id: "job-card" }, h("div", { class: "card-head" }, h("h3", { text: "Screener run" }),
+    h("span", { class: "chip " + (j.running ? "" : j.code === 0 ? "ok" : "err"), text: state })),
+    h("div", { class: "card-body" }, h("pre", { class: "log", text: (j.log || []).slice(-12).join("\n") || "Starting…" })));
+}
+async function startRun() {
+  const res = await postJSON("api/rerun", {});
+  if (res.status === 409 && res.running) L.notice = { kind: "warn", text: "A run is already in progress." };
+  else if (res.errors && !res.running) { L.notice = { kind: "warn", text: res.errors.join("; ") }; return render(); }
+  L.job = res; render(); pollRun();
+}
+function pollRun() {
+  clearTimeout(L.poll);
+  L.poll = setTimeout(async () => {
+    try { L.job = await getJSON("api/rerun"); } catch (e) { return; }
+    const card = $("job-card");
+    if (card && S.view === "lists") card.replaceWith(jobCard());
+    if (L.job.running) return pollRun();
+    if (L.job.code === 0) {
+      S.run = null; S.prev = "";  // jump to the run that just finished
+      L.notice = { kind: "ok", text: "Run finished: the dashboard now shows it." }; await reloadAll(); await loadLists();
+    }
+    else L.notice = { kind: "warn", text: "The run failed; the log below shows why." };
+    if (S.view === "lists") render();
+  }, 1500);
 }
 
 // ---------------------------------------------------------------- Method (definitions + parameter editor)
@@ -956,17 +1265,7 @@ function editPayload(e) {
   }
   return { valuation, rates };
 }
-async function postConfig(body) {
-  let r;
-  try {
-    r = await fetch("api/config", { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": S.config.csrf }, body: JSON.stringify(body) });
-  } catch (err) {  // server stopped or unreachable: report it instead of leaving the editor busy forever
-    return { ok: false, errors: ["Could not reach the dashboard server (" + err.message + "). Is it still running?"], changes: [] };
-  }
-  const out = await r.json().catch(() => ({ ok: false, errors: [r.statusText], changes: [] }));
-  if (!r.ok && !out.errors) out.errors = [out.error || r.statusText];
-  return out;
-}
+const postConfig = (body) => postJSON("api/config", body);
 async function reviewEdits() {
   const e = editState();
   e.busy = true; e.notice = null; render();

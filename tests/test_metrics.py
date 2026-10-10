@@ -322,3 +322,10 @@ def test_cost_basis_skips_when_units_disagree_or_inputs_missing():
     assert "no FX" in metrics.cost_basis(150.0, 125.0, "SEK", 10, 800.0, 1200.0, fx)["cost_flag"]
     unscored = metrics.cost_basis(150.0, math.nan, "USD", 10, 800.0, 1200.0, fx)     # fund: no ceiling
     assert unscored["cost_px"] == pytest.approx(100.0) and math.isnan(unscored["cost_score"])
+
+
+def test_position_value_uses_todays_price_and_fx():
+    fx = _FX({("USD", "EUR"): 0.80})
+    assert metrics.position_value(150.0, "USD", 10, fx) == pytest.approx(1200.0)
+    assert math.isnan(metrics.position_value(150.0, "SEK", 10, fx))      # no FX rate
+    assert math.isnan(metrics.position_value(150.0, "USD", 0, fx))       # no shares

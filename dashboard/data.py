@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import configedit
+from . import configedit, inputedit
 
 RUN_RE = re.compile(r"^screen_(\d{4}-\d{2}-\d{2}(?:_\d+)?)\.csv$")  # same-day reruns get _1, _2, ...
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?:_\d+)?$")
@@ -140,6 +140,58 @@ class Store:
                 "editable_keys": configedit.EDITABLE_VALUATION, "rate_ranges": configedit.RATE_RANGES,
                 "sha": hashlib.sha256(raw).hexdigest(),
                 "modified": datetime.fromtimestamp(self.config_path.stat().st_mtime).isoformat(timespec="minutes")}
+
+    # ---------- input lists (watchlist.csv, holdings.csv)
+    def input_paths(self) -> dict[str, Path]:
+        ic = {}
+        if self.config_path.is_file():
+            with open(self.config_path, "rb") as fh:
+                ic = tomllib.load(fh).get("inputs", {})
+        return {"watchlist": self.root / ic.get("watchlist", "input/watchlist.csv"),
+                "holdings": self.root / ic.get("holdings", "input/holdings.csv")}
+
+    def resolved_symbols(self) -> dict[str, str]:
+        """Input key -> Yahoo symbol from the screener's symbol cache and overrides, to link rows to run results."""
+        from screener.resolve import load_cache, load_overrides  # the dashboard ships with the screener
+        out = {k: (r.get("yahoo") or "") for k, r in load_cache(self.root / "data" / "symbol_map.csv").items()}
+        out.update(load_overrides(self.root / "overrides" / "symbols.csv"))
+        return out
+
+    def inputs_payload(self) -> dict:
+        out = {"resolved": self.resolved_symbols()}
+        for kind, path in self.input_paths().items():
+            raw = path.read_bytes() if path.is_file() else b""
+            rows = inputedit.read_rows(path)
+            if kind == "holdings":
+                for r in rows:
+                    for k in ("shares", "value_eur", "cost_eur"):
+                        try:
+                            r[k] = float(r[k].replace(",", "")) if r.get(k) else None
+                        except ValueError:
+                            r[k] = None
+            out[kind] = {"rows": rows, "sha": hashlib.sha256(raw).hexdigest(), "path": str(path.relative_to(self.root))}
+        return out
+
+    def edit_inputs(self, kind: str, rows, dry_run: bool, base_sha: str | None) -> tuple[dict, int]:
+        paths = self.input_paths()
+        if kind not in paths:
+            return {"ok": False, "errors": [f"unknown list {kind!r}"]}, 400
+        try:
+            clean = inputedit.clean_rows(kind, rows)
+        except ValueError as exc:
+            return {"ok": False, "errors": str(exc).split("; ")}, 400
+        with self._lock:
+            path = paths[kind]
+            raw = path.read_bytes() if path.is_file() else b""
+            if base_sha and base_sha != hashlib.sha256(raw).hexdigest():
+                return {"ok": False, "conflict": True, "errors": [f"{path.name} changed since this page loaded it; "
+                                                                  "reload and redo the edit"]}, 409
+            d = inputedit.diff(kind, inputedit.read_rows(path), clean)
+            out = {"ok": True, "diff": d, "rows": len(clean), "written": False}
+            if dry_run or not any(d.values()):
+                return out, 200
+            out.update(written=True, **inputedit.save(path, kind, clean, self.root / "data" / "input-history"))
+        return out, 200
 
     def universe_currencies(self) -> set[str]:
         """Reporting currencies in the latest run (these cannot be removed from the rates table)."""

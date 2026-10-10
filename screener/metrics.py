@@ -116,6 +116,14 @@ def _cagr(series: pd.Series, max_years: int = 3) -> float:
 UNIT_TOLERANCE = 0.15  # holdings-file euro price vs Yahoo's price at today's FX; beyond this the units differ (GDR ratio)
 
 
+def position_value(price: float, quote_ccy: str, shares: float, fx) -> float:
+    """Euro value of a holding at today's price and FX (used when the holdings file gives no value_eur)."""
+    if not (_isnum(price) and price > 0 and _isnum(shares) and shares > 0 and quote_ccy):
+        return math.nan
+    rate = fx.rate(quote_ccy, "EUR")
+    return shares * price * rate if rate else math.nan
+
+
 def cost_basis(price: float, ceiling_px: float, quote_ccy: str, shares: float, cost_eur: float,
                value_eur: float, fx) -> dict:
     """Your average buy price against today's max entry price, in the quote currency at today's FX.
