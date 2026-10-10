@@ -1,0 +1,25 @@
+[project]
+name = "tripwire"
+version = "0.1.0"
+description = "Weekly entry-price screener for a stock watchlist (Koyfin export + Parqet holdings) on free Yahoo Finance data, with a local dashboard"
+requires-python = ">=3.12"
+dependencies = [
+    "yfinance==1.7.0",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["screener"]

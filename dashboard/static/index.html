@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tripwire</title>
+<link rel="stylesheet" href="app.css">
+<script src="theme.js"></script>
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12l4-4 3 3 5-6"/><path d="M2 4h12" opacity=".55"/></svg>
+      </div>
+      <div>
+        <div class="brand-title">Tripwire</div>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="topbar-group">
+      <label for="run-select">Run</label>
+      <select id="run-select" aria-label="Screener run"></select>
+      <label for="prev-select">vs</label>
+      <select id="prev-select" aria-label="Compare with run"></select>
+      <span id="freshness" class="chip"></span>
+    </div>
+    <div class="topbar-group">
+      <button class="btn ghost" id="reload-btn" title="Reload data (picks up a new screener run)">
+        <svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg>Reload
+      </button>
+      <button class="btn ghost" id="theme-btn" title="Toggle light / dark">
+        <svg viewBox="0 0 16 16"><path d="M13 9.5A5.5 5.5 0 0 1 6.5 3a5.5 5.5 0 1 0 6.5 6.5z"/></svg><span>Theme</span>
+      </button>
+    </div>
+  </header>
+
+  <nav class="rail" id="rail" aria-label="Views"></nav>
+  <main class="main" id="main" tabindex="-1"></main>
+  <aside class="inspector closed" id="inspector" aria-label="Company detail"></aside>
+
+  <footer class="statusbar" id="statusbar"></footer>
+</div>
+<div class="tooltip" id="tooltip" role="tooltip"></div>
+<script src="app.js"></script>
+</body>
+</html>

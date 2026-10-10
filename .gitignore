@@ -1,0 +1,18 @@
+# personal data and generated output stay local
+input/koyfin/*.csv
+input/parqet_holdings.csv
+input/extra_tickers.csv
+data/
+reports/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.idea/
+*.egg-info/
+.claude/
+config.toml.bak
+# personal symbol fixes (ISINs of holdings) and raw Yahoo data used by the golden test stay local
+overrides/*.local.csv
+tests/fixtures/
+tests/golden/
