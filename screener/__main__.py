@@ -22,10 +22,13 @@ def load_config(path: Path) -> dict:
 
 
 def load_class_overrides(path: Path) -> dict[str, str]:
-    if not path.exists():
-        return {}
-    rows = csv.DictReader(universe.read_text(path).splitlines())
-    return {r["yahoo_symbol"].strip(): r["class"].strip() for r in rows if r.get("yahoo_symbol")}
+    """The versioned classification fixes plus an optional git-ignored <name>.local.csv beside them; local rows win."""
+    out: dict[str, str] = {}
+    for p in (Path(path), Path(path).with_suffix(".local.csv")):
+        if p.exists():
+            rows = csv.DictReader(universe.read_text(p).splitlines())
+            out.update({r["yahoo_symbol"].strip(): r["class"].strip() for r in rows if r.get("yahoo_symbol")})
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:

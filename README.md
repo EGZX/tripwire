@@ -51,7 +51,7 @@ A CSV copy of each run is kept in `data/history/`. Runs are never overwritten: a
 | Watchlist | `input/watchlist.csv` | Columns `symbol,name,isin,yahoo_symbol,lists`. Give at least one of `symbol`, `isin` or `yahoo_symbol` per company; a `yahoo_symbol` is used as is, anything else is resolved to a Yahoo listing (the name helps). `lists` takes free labels separated by `;` (e.g. `Core; Semis`), which become filters in the report and dashboard. Template: `examples/watchlist.csv`. |
 | Holdings | `input/holdings.csv` | Optional. Columns `isin,symbol,name,shares,value_eur,cost_eur`: current position value and the euro cost basis of the shares held. A holding attaches to the watchlist row with the same ISIN or symbol (else a unique name match) and is screened on its own if not on the watchlist. With `cost_eur`, holdings get a *score at your cost*: your average buy price against today's max entry price. Template: `examples/holdings.csv`. |
 | Symbol fixes | `overrides/symbols.csv` | Maps `source_key` (a watchlist symbol or an ISIN) to a Yahoo symbol, or to `SKIP`. Rows you would rather not share (for example ISINs of your own positions) go in `overrides/symbols.local.csv`, which is read too and git-ignored. Check the "Symbol check" sheet after adding names. |
-| Class fixes | `overrides/classification.csv` | Forces `operating`, `cyclical`, `financial`, `holdco` or `fund`. |
+| Class fixes | `overrides/classification.csv` | Forces `operating`, `cyclical`, `financial`, `holdco` or `fund`. Personal rows can go in the git-ignored `overrides/classification.local.csv`. |
 | Parameters | `config.toml` | Equity risk premium, adverse-case settings, horizon and caps, and the **per-currency rates table** (10-year yield, terminal growth, country risk premium, `as_of` date). Update the table when rates move, by hand or in the dashboard's Method view (see `dashboard/README.md`). The run refuses to start if a reporting currency in the universe is missing from it or a rate is malformed. |
 
 `input/` is git-ignored: your watchlist and positions never leave your machine. The shared `overrides/` files are versioned.
@@ -103,4 +103,10 @@ For operating companies the firm value is discounted at the equity hurdle (conse
 .venv\Scripts\python -m pytest -q
 ```
 
-`tests/test_golden.py` runs the model over 14 frozen Yahoo records in `tests/fixtures/cache/` and compares statuses and scores with `tests/golden/snapshot.json`. Any behaviour change fails it on purpose; after reviewing the diff, regenerate with `UPDATE_GOLDEN=1` in the environment. `yfinance` is pinned in `pyproject.toml`; bump it deliberately and rerun the golden test.
+`tests/test_golden.py` runs the model over 14 frozen Yahoo records in `tests/fixtures/cache/` and compares statuses and scores with `tests/golden/snapshot.json`. Any behaviour change fails it on purpose; after reviewing the diff, regenerate with `UPDATE_GOLDEN=1` in the environment. The fixtures are raw Yahoo data and are not distributed, so the test skips on a fresh clone; to build your own set, copy a few files from `data/cache/` into `tests/fixtures/cache/` after a run and generate the snapshot with `UPDATE_GOLDEN=1`. `yfinance` is pinned in `pyproject.toml`; bump it deliberately and rerun the golden test.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The bundled IBM Plex fonts (`dashboard/static/fonts/`) are under the SIL Open Font License, included alongside them.
+
+Tripwire is a screening aid, not investment advice. Yahoo Finance data is unofficial and can be wrong or incomplete; verify anything that matters against company filings.

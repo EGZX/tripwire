@@ -111,3 +111,12 @@ def test_symbol_overrides_merge_a_local_file_that_wins(tmp_path):
     (tmp_path / "symbols.local.csv").write_text("source_key,yahoo_symbol,note\nDK0062498333,NOVO-B.CO,local\nAIR,SKIP,\n",
                                                 encoding="utf-8")
     assert load_overrides(shared) == {"AIR": "SKIP", "NOVO": "NOVO-B.CO", "DK0062498333": "NOVO-B.CO"}
+
+
+def test_class_overrides_merge_a_local_file_that_wins(tmp_path):
+    from screener.__main__ import load_class_overrides
+    shared = tmp_path / "classification.csv"
+    shared.write_text("yahoo_symbol,class,note\nV,operating,\nBN,holdco,\n", encoding="utf-8")
+    (tmp_path / "classification.local.csv").write_text("yahoo_symbol,class,note\nBN,financial,\nXYZ,fund,\n",
+                                                       encoding="utf-8")
+    assert load_class_overrides(shared) == {"V": "operating", "BN": "financial", "XYZ": "fund"}

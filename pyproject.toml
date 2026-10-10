@@ -3,6 +3,7 @@ name = "tripwire"
 version = "0.1.0"
 description = "Weekly entry-price screener for a stock watchlist on free Yahoo Finance data, with a local dashboard"
 requires-python = ">=3.12"
+license = { text = "MIT" }
 dependencies = [
     "yfinance==1.7.0",
     "pandas>=2.2",
