@@ -63,3 +63,36 @@ a live SEC validation requires an explicit CIK and configured `SEC_USER_AGENT`.
 Sector forecasts require their documented sourced inputs; missing inputs abstain.
 Automatic operating outputs remain accounting proxies with disclosed assumptions.
 Experimental estimation and probabilistic methods remain outside production.
+
+## Integration into main
+
+The user confirmed the previous lease owner had finished and authorized committing
+its pending work. Commit `b313055` preserves those edits separately; its tree is
+identical to checkpoint `0989ca8`. The valuation-only commit was applied as
+`da05774` and merged in `64f31f6` without conflicts. The resulting tree matched
+the reviewed implementation `b73bbf9` exactly. A trailing blank line was removed
+during the final whitespace check; no model behavior changed during integration.
+
+Post-integration verification ran from the shared `main` checkout:
+
+- All **169 tests passed**. All 14 frozen fixtures matched the isolated checkout
+  by SHA-256. The new golden output exactly matched the previously reviewed
+  expectations; the old local golden file was backed up before replacement.
+- All **131 saved provider records** computed successfully; **64 funded paths**
+  passed the invariants. Main retains its local DXYZ fund override, so the result
+  was six eligible, 44 above ceiling, 14 data-flagged, 48 not-rankable and 19
+  not-screened records. An isolated replay without that local override confirmed
+  identical absolute valuations and statuses for every other issuer; only the
+  relative financial-sector rankings changed when DXYZ left that comparison set.
+  The earlier saved corpus also predates the final broker model labels for HOOD
+  and IBKR; this affects labels only, not their valuations or abstention status.
+- All **300 numerical cases** were replayed: 298 unique solutions, two correctly
+  identified ambiguous cases, maximum relative forward residual **2.25e-12**.
+- The integrated dashboard overview, method and issuer inspector passed the
+  browser check with no page errors or horizontal overflow. JavaScript syntax
+  and the final Git whitespace check passed.
+
+Backups, fixture hashes, raw replay results, differences, test output and browser
+receipts are retained beside the original audit in `integration-2026-10-11/`.
+These are saved-data checks; no new live filing tie-out or predictive backtest
+was performed. Local inputs, provider caches and production reports were preserved.

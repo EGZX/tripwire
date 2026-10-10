@@ -193,4 +193,3 @@ def annual_capital_window(series:pd.Series,end:pd.Timestamp) -> tuple[pd.Timesta
     if end not in series.index or series[end]<=0:return None
     starts=[d for d in series.index if (end-d).days in (364,365,366,371) and series[d]>0]
     return (max(starts),end) if starts else None
-
