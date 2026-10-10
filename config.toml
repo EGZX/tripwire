@@ -5,6 +5,7 @@ watchlist = "input/watchlist.csv"   # symbol,name,isin,yahoo_symbol,lists   (see
 holdings = "input/holdings.csv"     # isin,symbol,name,shares,value_eur,cost_eur   (optional)
 symbol_overrides = "overrides/symbols.csv"
 classification_overrides = "overrides/classification.csv"
+valuation_overrides = "overrides/valuation.toml" # source-labeled sector facts and base/stress assumptions
 
 [fetch]
 pause_seconds = 0.4            # politeness delay between symbols
@@ -13,10 +14,10 @@ max_retries = 4                # backoff 30s, 60s, 120s, 240s on rate limits
 
 [valuation]
 equity_risk_premium = 0.045    # hurdle = currency risk-free + this. 1.0 x ERP: a market-like required return
-adverse_return_spread = 0.025  # adverse-case floor = currency risk-free + this (half the ERP: a real return even in the bad case)
+
 min_hurdle = 0.07              # never require less than this nominal return, whatever the local rates say
 min_rate_over_terminal_growth = 0.02  # hurdle and floor are lifted to at least terminal growth + this (Gordon needs r > g)
-base_currency = "EUR"          # implied returns are also shown converted to this currency by the rate differential
+base_currency = "EUR"          # optional FX-parity scenario, not an expected EUR equity return
 adverse_growth_mode = "half"   # "half": adverse growth = half the lowest growth input (declines kept); "haircut": minus adverse_growth_haircut
 adverse_growth_haircut = 0.05
 cyclical_adverse_growth_at_terminal = true  # cyclicals: adverse growth never above terminal growth (cycle reverts to trend)
@@ -29,10 +30,12 @@ return_smoothing = true        # return on new capital = lower of current and 3-
 insurer_smooth_earnings = true # insurers: base earnings = lower of TTM and 3-year average
 bank_min_equity_to_assets = 0.04  # banks below this get a critical "thin capital" flag
 stale_after_days = 270         # flag when the oldest statement used is older than this
+quote_max_age_days = 7         # calendar-day freshness policy; accommodates normal market closures
+rates_max_age_days = 90        # same review interval as the dashboard rate warning
 
-# Per reporting currency: 10-year government yield (rf), nominal terminal growth (g) and country risk premium (crp,
-# added to both the hurdle and the floor; 0 for the majors). Hurdle = rf + equity_risk_premium + crp; adverse floor =
-# rf + adverse_return_spread + crp. The run refuses to start if a reporting currency in the universe is missing here.
+# Currency rates set nominal policy hurdles and terminal growth. Country risk is
+# configured separately below; reporting currency never determines geographic risk.
+# Base and operating stress use the SAME discount rate.
 # Values are Oct 2026 estimates: update when rates move.
 [rates]
 USD = { rf = 0.0524, g = 0.030, as_of = "2026-10-10" }
@@ -41,20 +44,20 @@ CHF = { rf = 0.005, g = 0.010, as_of = "2026-10-10" }
 JPY = { rf = 0.016, g = 0.010, as_of = "2026-10-10" }
 GBP = { rf = 0.046, g = 0.025, as_of = "2026-10-10" }
 CAD = { rf = 0.034, g = 0.025, as_of = "2026-10-10" }
-PLN = { rf = 0.055, g = 0.035, crp = 0.013, as_of = "2026-10-10" }
-KZT = { rf = 0.140, g = 0.060, crp = 0.030, as_of = "2026-10-10" }
-CNY = { rf = 0.018, g = 0.030, crp = 0.010, as_of = "2026-10-10" }
-TWD = { rf = 0.015, g = 0.020, crp = 0.006, as_of = "2026-10-10" }
-HKD = { rf = 0.035, g = 0.030, crp = 0.006, as_of = "2026-10-10" }
+PLN = { rf = 0.055, g = 0.035, as_of = "2026-10-10" }
+KZT = { rf = 0.140, g = 0.060, as_of = "2026-10-10" }
+CNY = { rf = 0.018, g = 0.030, as_of = "2026-10-10" }
+TWD = { rf = 0.015, g = 0.020, as_of = "2026-10-10" }
+HKD = { rf = 0.035, g = 0.030, as_of = "2026-10-10" }
 SEK = { rf = 0.025, g = 0.020, as_of = "2026-10-10" }
 NOK = { rf = 0.038, g = 0.025, as_of = "2026-10-10" }
 DKK = { rf = 0.025, g = 0.020, as_of = "2026-10-10" }
 AUD = { rf = 0.043, g = 0.025, as_of = "2026-10-10" }
 SGD = { rf = 0.027, g = 0.020, as_of = "2026-10-10" }
-KRW = { rf = 0.030, g = 0.025, crp = 0.006, as_of = "2026-10-10" }
-INR = { rf = 0.065, g = 0.050, crp = 0.025, as_of = "2026-10-10" }
-BRL = { rf = 0.130, g = 0.045, crp = 0.035, as_of = "2026-10-10" }
-MXN = { rf = 0.090, g = 0.040, crp = 0.025, as_of = "2026-10-10" }
+KRW = { rf = 0.030, g = 0.025, as_of = "2026-10-10" }
+INR = { rf = 0.065, g = 0.050, as_of = "2026-10-10" }
+BRL = { rf = 0.130, g = 0.045, as_of = "2026-10-10" }
+MXN = { rf = 0.090, g = 0.040, as_of = "2026-10-10" }
 
 [scoring]
 # Weights for the descriptive peer-group percentiles (context columns only; they are not a gate).
@@ -62,3 +65,29 @@ w_value = 0.40
 w_quality = 0.30
 w_growth = 0.20
 w_balance = 0.10
+
+# Provider-country SCREENING PROXIES migrated from the previous policy table; these are
+# not calibrated operating-exposure estimates. Issuer geographic assumptions override them.
+# Countries without an existing policy (e.g. Uruguay/Israel) require explicit inputs.
+[country_risk]
+"United States" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Canada" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Netherlands" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"United Kingdom" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Japan" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"France" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Switzerland" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Denmark" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Germany" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Poland" = { premium = 0.013, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Ireland" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Singapore" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Australia" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Kazakhstan" = { premium = 0.03, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"China" = { premium = 0.01, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Austria" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Luxembourg" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Brazil" = { premium = 0.035, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Italy" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Sweden" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
+"Taiwan" = { premium = 0.006, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }

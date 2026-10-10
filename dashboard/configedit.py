@@ -22,12 +22,10 @@ from screener import checks
 EDITABLE_VALUATION: dict[str, dict] = {
     "equity_risk_premium": {"type": "pct", "min": 0.0, "max": 0.20, "label": "Equity risk premium", "tier": 2,
                             "help": "Added to the currency 10-year yield to form the hurdle."},
-    "adverse_return_spread": {"type": "pct", "min": 0.0, "max": 0.20, "label": "Adverse floor spread", "tier": 2,
-                              "help": "Added to the 10-year yield to form the adverse-case floor."},
     "min_hurdle": {"type": "pct", "min": 0.0, "max": 0.30, "label": "Minimum hurdle", "tier": 2,
                    "help": "Never require less than this nominal return, whatever the local rates say."},
     "base_currency": {"type": "currency", "label": "Base currency", "tier": 2,
-                      "help": "Implied returns are also shown converted to this currency."},
+                      "help": "Shows an FX-parity scenario; not an expected equity return in this currency."},
     "adverse_growth_mode": {"type": "choice", "choices": ["half", "haircut"], "label": "Adverse growth", "tier": 2,
                             "help": "half: half the lowest growth input (declines kept). haircut: lowest input minus the haircut."},
     "adverse_growth_haircut": {"type": "pct", "min": 0.0, "max": 0.50, "label": "Adverse growth haircut", "tier": 2,

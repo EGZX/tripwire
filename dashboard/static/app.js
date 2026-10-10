@@ -15,7 +15,7 @@ const SCORED = ["eligible", "data flag", "price above ceiling"];
 const STATUS_ORDER = ["eligible", "data flag", "price above ceiling", "not rankable", "not screened"];
 const STATUS_LABEL = { "eligible": "Candidate", "data flag": "Data flag", "price above ceiling": "Above ceiling",
   "not rankable": "Not rankable", "not screened": "Not screened" };
-const CRITICAL = ["stale financials", "no market cap", "check one-offs", "thin capital"];  // screener/scoring.py CRITICAL_FLAGS
+const CRITICAL = ["stale financials", "no market cap", "check one-offs", "thin capital", "quote date unavailable", "quote refresh failed", "stale cache fallback", "country exposure unavailable", "short-window cycle proxy", "stale or future quote", "stale or future rates", "rate date unavailable", "filing verification unavailable", "stale or future FX", "FX date unavailable"];  // screener/scoring.py CRITICAL_FLAGS
 const CLIP_LO = -100, CLIP_HI = 100;  // the screener floors the entry score at -100 (price >= 2x the ceiling)
 const TICKS = [-100, -75, -50, -25, 0, 25, 50, 75, 100];
 const MINUS = "−";
@@ -79,6 +79,7 @@ const fmtPx = (v) => { const x = num(v); return x === Infinity ? "∞ (unbounded
 const fmtEur = (v) => ok(v) ? "€" + fmtNum(v, 0) : "–";
 const fmtEurK = (v) => { const x = num(v); if (!Number.isFinite(x)) return "–"; return Math.abs(x) >= 1e6 ? "€" + (x / 1e6).toFixed(2) + "M" : Math.abs(x) >= 1e4 ? "€" + (x / 1e3).toFixed(1) + "k" : fmtEur(x); };
 const fmtRatio = (v, d = 2) => fmtNum(v, d);
+function requiredRate(r) { const d = num(r.decision_rate); return Number.isFinite(d) ? d : num(r.hurdle); }
 function baseCcy() { return (S.config && S.config.valuation && S.config.valuation.base_currency) || "EUR"; }
 function fmtDate(d) { return d || "–"; }
 const runDay = (run) => String(run || "").slice(0, 10);  // run ids are YYYY-MM-DD or YYYY-MM-DD_N for same-day reruns
@@ -383,15 +384,15 @@ const C = {
   cls: { key: "class", label: "Class" },
   score: { key: "entry_score", label: "Entry score", num: true, title: "100 × (1 − price / max entry price)", fmt: (r) => scoreCell(r.entry_score), sort: (r) => num(r.entry_score) },
   price: { key: "price", label: "Price", num: true, fmt: (r) => fmtPx(r.price), sort: (r) => num(r.price) },
-  ceiling: { key: "ceiling_px", label: "Max entry", num: true, title: "Max entry price per share, quote currency", fmt: (r) => fmtPx(r.ceiling_px), sort: (r) => num(r.ceiling_px) },
+  ceiling: { key: "ceiling_px", label: "Max entry", num: true, title: "Maximum quote price under the declared model and purchase policy; not verified fair value", fmt: (r) => fmtPx(r.ceiling_px), sort: (r) => num(r.ceiling_px) },
   ccy: { key: "quote_ccy", label: "Ccy" },
   head: { key: "headroom", label: "To ceiling", num: true, title: "Price change that puts the price exactly on the max entry price (ceiling / price − 1)",
     fmt: (r) => fmtSignedPct(headroom(r)), sort: (r) => headroom(r), cellCls: (r) => headroom(r) >= 0 ? "pos-text" : "" },
-  adv: { key: "adverse_score", label: "Adverse score", num: true, title: "Same formula against the adverse-case value: the downside check", fmt: (r) => fmtScore(r.adverse_score), sort: (r) => num(r.adverse_score) },
-  impRet: { key: "implied_return", label: "Impl. return", num: true, fmt: (r) => fmtPct(r.implied_return), sort: (r) => num(r.implied_return) },
+  adv: { key: "adverse_score", label: "Stress score", num: true, title: "Same formula against the adverse-case value: the downside check", fmt: (r) => fmtScore(r.adverse_score), sort: (r) => num(r.adverse_score) },
+  impRet: { key: "implied_return", label: "Impl. flow yield", num: true, fmt: (r) => fmtPct(r.implied_return), sort: (r) => num(r.implied_return) },
   hurdle: { key: "hurdle", label: "Hurdle", num: true, fmt: (r) => fmtPct(r.hurdle), sort: (r) => num(r.hurdle) },
-  spread: { key: "spread", label: "Impl. − hurdle", num: true, title: "Implied return minus the currency hurdle, percentage points",
-    fmt: (r) => fmtPP(num(r.implied_return) - num(r.hurdle)), sort: (r) => num(r.implied_return) - num(r.hurdle) },
+  spread: { key: "spread", label: "Yield − required", num: true, title: "Implied cash-flow yield minus the binding required rate, percentage points",
+    fmt: (r) => fmtPP(num(r.implied_return) - requiredRate(r)), sort: (r) => num(r.implied_return) - requiredRate(r) },
   pos: { key: "position_eur", label: "Position", num: true, fmt: (r) => ok(r.position_eur) ? fmtEur(r.position_eur) : "", sort: (r) => num(r.position_eur) },
 };
 const pctCol = (key, label, title) => ({ key, label, num: true, title, fmt: (r) => fmtPct(r[key]), sort: (r) => num(r[key]) });
@@ -611,10 +612,10 @@ const COLSETS = {
   decision: () => [C.symbol, C.name, C.status, C.cls, C.score, C.price, C.ceiling, C.ccy, C.head, C.adv, C.impRet, C.hurdle, C.spread,
     pctCol("est_growth", "Est. g"), pctCol("implied_growth", "Impl. g"), pctCol("return_on_capital", "R", "Return on new capital (ROIC or ROE, capped)"), C.pos],
   valuation: () => [C.symbol, C.name, C.price, C.ceiling, { key: "reasonable_px", label: "Reasonable", num: true, fmt: (r) => fmtPx(r.reasonable_px), sort: (r) => num(r.reasonable_px) },
-    { key: "adverse_px", label: "Adverse", num: true, fmt: (r) => fmtPx(r.adverse_px), sort: (r) => num(r.adverse_px) }, C.ccy, C.adv, C.hurdle,
-    pctCol("floor_rate", "Adverse floor"), pctCol("est_growth", "Est. g"), pctCol("adverse_growth", "Adverse g"), pctCol("terminal_growth", "Terminal g"),
+    { key: "adverse_px", label: "Operating stress", num: true, fmt: (r) => fmtPx(r.adverse_px), sort: (r) => num(r.adverse_px) }, C.ccy, C.adv, C.hurdle,
+    pctCol("floor_rate", "Stress rate"), pctCol("est_growth", "Est. g"), pctCol("adverse_growth", "Stress g"), pctCol("terminal_growth", "Terminal g"),
     pctCol("return_on_capital", "R"), pctCol("reinvest_rate", "Reinvest", "Share of earnings reinvested to fund growth (g / R)"),
-    pctCol("implied_return_base", "Impl. return, base ccy", "Local implied return converted to the base currency by the rate differential"),
+    pctCol("fx_parity_return", "FX-parity scenario", "Illustrative FX-parity scenario, not an expected base-currency equity return"),
     { key: "caps_hit", label: "Caps hit", cls: "wrap" }],
   fundamentals: () => [C.symbol, C.name, C.cls, pctCol("nopat_yield", "NOPAT/EV"), pctCol("fcf_yield", "FCF−SBC/EV"), pctCol("ebit_yield", "EBIT/EV"),
     pctCol("earnings_yield", "Earn. yield"), pctCol("roic", "ROIC"), pctCol("roic_ex_goodwill", "ROIC ex GW"), pctCol("roe", "ROE"), pctCol("gross_profitability", "GP/assets"),
@@ -1215,10 +1216,10 @@ function derivedRates(r, v) {
   const rf = num(r.rf), g = num(r.g), crp = num(r.crp) || 0, erp = num(v.equity_risk_premium);
   if (![rf, g, erp].every(Number.isFinite)) return { hurdle: NaN, floor: NaN, minBinds: false };
   const least = g + (num(v.min_rate_over_terminal_growth) || 0.02);
-  let hurdle = Math.max(rf + erp + crp, least);
+  let hurdle = Math.max(rf + erp, least); // currency preview excludes issuer country risk
   const minBinds = hurdle < (num(v.min_hurdle) || 0);
   if (minBinds) hurdle = num(v.min_hurdle);
-  const floor = Math.min(Math.max(rf + (num(v.adverse_return_spread) || 0) + crp, least), hurdle);
+  const floor = hurdle;
   return { hurdle, floor, minBinds };
 }
 const pctIn = (x) => Number.isFinite(num(x)) ? String(Number((num(x) * 100).toFixed(3))) : "";
@@ -1304,18 +1305,8 @@ function viewMethod() {
   if (c.modified && S.data.written_at && c.modified > S.data.written_at)
     out.push(h("div", { class: "banner warn" }, icon('<path d="M10 3l7.5 13h-15z"/><path d="M10 8v4M10 14.2v.3"/>'),
       h("div", { text: "config.toml was modified (" + c.modified.replace("T", " ") + ") after this run was written (" + S.data.written_at.replace("T", " ") + "). The parameters below are the current file, not necessarily the ones this run used. Per-name hurdles in the tables are the run's own." })));
-  const defs = [
-    ["Purpose", "Triage: decides which companies deserve a full valuation. It is not a buy list."],
-    ["Max entry price", "The reasonable-case equity value per share, in the quote currency."],
-    ["Entry score", "100 × (1 − price / max entry price), floored at −100 (price at least twice the ceiling, where the exact gap says nothing). +20: the price is 20% below the ceiling. Negative: above it. A signed price gap, not a return forecast or a probability."],
-    ["To ceiling", "ceiling / price − 1: the price move that would put the name exactly on its max entry price. −20% means the price must fall 20%."],
-    ["Funded growth", "Earnings grow at g, fading to the currency's terminal growth. The owner receives earnings × (1 − g / R), R = return on new capital (ROIC excluding goodwill, or ROE; lower of current and 3-year average, capped). Growth adds nothing when R equals the discount rate."],
-    ["Reasonable case", "g = mean of 3-year revenue CAGR and analyst growth (clipped, capped at R); R held; discounted at the hurdle = currency 10-year yield + equity risk premium + country risk, at least terminal growth + 2 points and at least the minimum hurdle."],
-    ["Adverse case", "Lower growth (see Parameters; cyclicals on the trough margin and never above terminal growth); R fades to the hurdle; discounted at the floor = currency 10-year yield + spread + country risk. Shown as the adverse score (same formula against the adverse value), a downside check that does not change the max entry price or the status."],
-    ["Status", "Candidate: score ≥ 0 and no critical flag. Data flag: scored but stale statements, no market cap, a yield above 25% or a bank with thin capital. Not rankable: an essential input is missing or the ceiling is at or below zero. Not screened: loss-making, holding company or fund."],
-    ["Implied return / growth", "Implied return: discount rate at which the reasonable-case funded path equals EV (market cap for financials); the base-currency version subtracts the 10-year yield differential so currencies compare on one number. Implied growth: starting growth the price needs at the hurdle, limited to growth the business can fund."],
-    ["Peer percentiles", "Value / quality / growth / balance ranks within operating+cyclical or financials. Context only: they are not gates and shift when the watchlist changes."],
-  ];
+  const defs = c.method || [["Method", "Open the run report for its saved method and evidence."]];
+
   if (!c.available) {
     out.push(h("div", { class: "grid halves" }, card("Definitions", "", h("dl", { class: "prose" }, defs.map(([k, v]) => [h("dt", { text: k }), h("dd", { text: v })]))),
       card("Parameters", "config.toml not found", h("div", { class: "empty", text: "No config.toml under " + (S.root || "") }))));
@@ -1385,7 +1376,7 @@ function ratesEditor(e, editable) {
     return h("tr", { class: removed ? "removed" : "" },
       h("td", {}, ccyCell), h("td", { class: "num", text: String(counts.get(id) || "") }),
       h("td", { class: "num" }, pct(r, "rf", id, "10y yield")), h("td", { class: "num" }, pct(r, "g", id, "terminal growth")),
-      h("td", { class: "num" }, pct(r, "crp", id, "country risk", { min: 0 })),
+      h("td", { class: "dim", text: "per issuer" }),
       h("td", { class: "num", id: "rate-h-" + id, text: fmtPct(d.hurdle) + (d.minBinds ? " (min)" : "") }),
       h("td", { class: "num", id: "rate-f-" + id, text: fmtPct(d.floor) }),
       h("td", {}, dateIn(r, id)), h("td", {}, Object.assign(ageChip(r.as_of), { id: "rate-age-" + id })),
@@ -1397,7 +1388,7 @@ function ratesEditor(e, editable) {
   const added = e.added.map((a, i) => row("new" + i,
     h("input", { type: "text", maxlength: 3, placeholder: "CCY", value: a.ccy || "", "aria-label": "new currency code", class: "mono ccy", oninput: (ev) => { a.ccy = ev.target.value.toUpperCase(); } }),
     a, true, () => { e.added.splice(i, 1); render(); }, false));
-  const head = ["Ccy", "Names", "10y yield %", "Terminal g %", "Country risk %", "Hurdle", "Adverse floor", "As of", "Age", editable ? "" : null].filter((x) => x !== null);
+  const head = ["Ccy", "Names", "10y yield %", "Terminal g %", "Country risk %", "Hurdle", "Stress rate", "As of", "Age", editable ? "" : null].filter((x) => x !== null);
   return h("div", { class: "table-wrap" }, h("table", { class: "data dense rates" },
     h("thead", {}, h("tr", {}, head.map((t, i) => h("th", { class: i >= 2 && i <= 6 ? "num" : "", text: t })))),
     h("tbody", {}, rows, added,
@@ -1443,7 +1434,7 @@ async function renderInspector() {
   const has = (k) => r[k] !== null && r[k] !== undefined && r[k] !== "";
   const pct = (k, label) => has(k) ? [label, fmtPct(r[k])] : null;
   const ratio = (k, label, d = 2) => has(k) ? [label, fmtRatio(r[k], d)] : null;
-  const spread = num(r.implied_return) - num(r.hurdle);
+  const spread = num(r.implied_return) - requiredRate(r);
   const flags = splitFlags(r);
   const yahoo = r.symbol ? "https://finance.yahoo.com/quote/" + encodeURIComponent(r.symbol) : null;
 
@@ -1459,18 +1450,19 @@ async function renderInspector() {
       scored ? h("div", { class: "score-line" }, h("span", { class: "big", text: fmtScore(x) }),
         h("span", { class: "expl", text: hr >= 0 ? "price is " + fmtPct(1 - num(r.price) / num(r.ceiling_px), 0) + " below the max entry price" : "price must fall " + fmtPct(-hr, 0) + " to reach the max entry price" }))
         : h("div", { class: "dim", text: r.not_rankable ? "Not rankable: " + r.not_rankable : r.status === "not screened" ? "Not screened (" + (r.class || "") + "): no ceiling is computed for this class." : "No score." }),
-      scored && ok(r.adverse_score) ? h("div", { class: "small dim", text: "Adverse score " + fmtScore(r.adverse_score) }) : null,
+      scored && ok(r.adverse_score) ? h("div", { class: "small dim", text: "Stress score " + fmtScore(r.adverse_score) }) : null,
       scored && ok(r.cost_score) ? h("div", { class: "small dim", text: "Score at your avg cost (" + fmtPx(r.cost_px) + ") " + fmtScore(r.cost_score) }) : null,
       scored ? ladder(r) : null),
     scored || has("price") ? h("div", { class: "insp-section" }, h("h4", { text: "Valuation (" + (ccy || "quote currency") + " per share)" }), kv([
-      ["Price", fmtPx(r.price)], ["Max entry price", fmtPx(r.ceiling_px)], ["Reasonable value", fmtPx(r.reasonable_px)], ["Adverse value", fmtPx(r.adverse_px)],
-      has("implied_return") ? ["Implied return", fmtPct(r.implied_return), Number.isFinite(spread) ? fmtPP(spread) + " vs hurdle" : null] : null,
-      has("implied_return_base") ? ["Implied return in " + baseCcy() + " terms", fmtPct(r.implied_return_base)] : null,
-      pct("hurdle", "Hurdle (reasonable)"), pct("floor_rate", "Adverse floor rate"),
+      ["Price", fmtPx(r.price)], ["Max entry price", fmtPx(r.ceiling_px)], ["Reasonable value", fmtPx(r.reasonable_px)], ["Operating stress value", fmtPx(r.adverse_px)],
+      has("implied_return") ? ["Implied flow yield", fmtPct(r.implied_return), Number.isFinite(spread) ? fmtPP(spread) + " vs hurdle" : null] : null,
+      has("fx_parity_return") ? ["FX-parity scenario in " + baseCcy(), fmtPct(r.fx_parity_return)] : null,
+      ["Model", r.model_label || r.model || "legacy"], ["Value basis", r.valuation_basis || "legacy run"], pct("discount_rate", "Valuation rate"), ["Evidence", r.model_quality || "legacy run"], ["Flow claim", r.implied_return_claim === "firm" ? "Whole business" : r.implied_return_claim === "equity" ? "Common equity" : "unknown"], ["Growth solution", r.implied_growth_status || "legacy"], r.implied_growth_status === "nonunique" ? ["Growth solutions", JSON.parse(r.implied_growth_roots || "[]").map((g) => fmtPct(g, 2)).join(" / ")] : null, ["Quote as of", r.price_as_of || "unknown"],
+      pct("hurdle", "Policy hurdle"), pct("decision_rate", "Required rate"), pct("floor_rate", "Stress discount rate"),
       has("est_growth") ? ["Estimated growth", fmtPct(r.est_growth)] : null,
       has("est_growth") ? ["Implied growth", has("implied_growth") ? fmtPct(r.implied_growth) : "no solution", null] : null,
-      pct("adverse_growth", "Adverse growth"), pct("terminal_growth", "Terminal growth"),
-      pct("return_on_capital", "Return on new capital (R)"), pct("reinvest_rate", "Reinvestment rate (g / R)")]),
+      pct("adverse_growth", "Stress growth"), pct("terminal_growth", "Terminal growth"),
+      pct("return_on_capital", "Assumed incremental return (R)"), pct("reinvest_rate", "Reinvestment rate (g / R)")]),
       has("caps_hit") ? h("div", { class: "small dim", style: { marginTop: "6px" }, text: "Caps hit: " + r.caps_hit }) : null) : null,
     h("div", { class: "insp-section", id: "insp-history" }, h("h4", { text: "Price and max entry across runs" }), h("div", { class: "dim small", text: "Loading…" })),
     h("div", { class: "insp-section" }, h("h4", { text: "Fundamentals" }), kv([
@@ -1501,7 +1493,7 @@ function ladder(r) {
   const items = [["Max entry price", num(r.ceiling_px), "var(--pos)"]];
   // runs before 2026-10-10 evening took the lower of the two cases; show the reasonable value only where it differs
   if (ok(r.reasonable_px) && Math.abs(num(r.reasonable_px) / num(r.ceiling_px) - 1) > 1e-9) items.push(["Reasonable value", num(r.reasonable_px), "var(--neutral-mark)"]);
-  items.push(["Adverse value", num(r.adverse_px), "var(--neutral-mark)"]);
+  items.push(["Operating stress value", num(r.adverse_px), "var(--neutral-mark)"]);
   const p = num(r.price);
   const finite = [p, ...items.map((i) => i[1])].filter(Number.isFinite);
   const hi = Math.max(...finite) * 1.08;

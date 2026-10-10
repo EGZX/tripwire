@@ -1,0 +1,70 @@
+# Fictional examples only. This file is NOT loaded by the screener.
+# Copy a complete issuer entry to overrides/valuation.local.toml only after
+# replacing the identifier, sources, dates, currency and all financial inputs.
+# Amounts below are raw currency units, percentages annual decimal fractions.
+# Quote dotted ticker keys, e.g. [issuers."EXAMPLE.SW"].
+# A sourced model_family can correct provider classification (see method docs).
+
+[issuers.EXAMPLE_BANK]
+source = "Replace with filing/table and assumption rationale"
+as_of = "2026-06-30"
+period_end = "2026-06-30"
+currency = "USD"
+model = "bank_capital"
+country_risk_premium = 0.02
+discount_rate = 0.11
+discount_rate_basis = "cost_of_equity"
+
+[issuers.EXAMPLE_BANK.base]
+net_income = 10.0
+growth = 0.05
+capital_growth = 0.04
+available_capital = 100.0
+capital_base = 1000.0
+required_capital_ratio = 0.10
+payout_limit = 1.0
+releasable_excess = 0.0
+terminal_growth = 0.02
+
+[issuers.EXAMPLE_BANK.stress]
+net_income = 7.0
+growth = 0.01
+capital_growth = 0.04
+available_capital = 100.0
+capital_base = 1000.0
+required_capital_ratio = 0.10
+payout_limit = 1.0
+releasable_excess = 0.0
+terminal_growth = 0.02
+
+[issuers.EXAMPLE_OPERATOR]
+source = "Replace with filing/table and normalized forecast assumptions"
+as_of = "2026-06-30"
+period_end = "2026-06-30"
+currency = "USD"
+model = "operating_forecast"
+discount_rate = 0.09
+discount_rate_basis = "wacc"
+country_risk_premium = 0.0
+
+[issuers.EXAMPLE_OPERATOR.base]
+revenue = 1000.0
+growth = 0.08
+margin_start = 0.12
+margin_terminal = 0.15
+tax_rate = 0.25
+sales_to_capital = 2.0
+maintenance_net_capex = 10.0
+funding_capacity = 100.0
+terminal_growth = 0.02
+
+[issuers.EXAMPLE_OPERATOR.stress]
+revenue = 900.0
+growth = 0.02
+margin_start = 0.08
+margin_terminal = 0.12
+tax_rate = 0.25
+sales_to_capital = 1.5
+maintenance_net_capex = 15.0
+funding_capacity = 100.0
+terminal_growth = 0.02

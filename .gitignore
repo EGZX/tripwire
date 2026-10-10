@@ -15,3 +15,5 @@ config.toml.bak
 overrides/*.local.csv
 tests/fixtures/
 tests/golden/
+
+overrides/*.local.toml

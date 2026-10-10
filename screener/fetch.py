@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import pickle
+import hashlib
+import os
+import tempfile
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -9,9 +12,11 @@ from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
+from .market import Observation, quote_time
 
 STATEMENTS = ["ttm_income_stmt", "ttm_cashflow", "income_stmt", "cashflow", "balance_sheet",
-              "quarterly_balance_sheet"]
+              "quarterly_balance_sheet", "quarterly_income_stmt", "quarterly_cashflow"]
+CACHE_SCHEMA = 2
 
 
 def _cache_file(cache_dir: Path, symbol: str) -> Path:
@@ -33,7 +38,7 @@ def _is_rate_limit(exc: Exception) -> bool:
 
 def fetch_symbol(symbol: str) -> dict:
     t = yf.Ticker(symbol)
-    data: dict = {"symbol": symbol, "fetched_at": datetime.now(timezone.utc), "errors": []}
+    data: dict = {"schema": CACHE_SCHEMA, "symbol": symbol, "fetched_at": datetime.now(timezone.utc), "errors": []}
     data["info"] = t.info or {}
     for name in STATEMENTS:
         try:
@@ -49,6 +54,14 @@ def fetch_symbol(symbol: str) -> dict:
         if _is_rate_limit(exc):
             raise
         data["revenue_estimate"] = None
+        data["errors"].append(f"revenue_estimate: {exc}")
+    for name in ("earnings_estimate", "eps_trend", "eps_revisions"):
+        try:
+            data[name] = getattr(t,name)
+        except Exception as exc:
+            if _is_rate_limit(exc):raise
+            data[name] = None
+            data["errors"].append(f"{name}: {exc}")
     hist = t.history(period="6y", interval="1mo", auto_adjust=False)
     data["history"] = hist[["Close"]] if "Close" in hist else pd.DataFrame()
     return data
@@ -58,18 +71,30 @@ def get(symbol: str, cache_dir: Path, max_age_days: float, max_retries: int, for
         log=print) -> tuple[dict | None, bool]:
     """Return (data, fetched_now). Cached data younger than max_age_days is reused."""
     cached = load_cached(cache_dir, symbol)
-    if cached and not force:
+    if cached and not force and cached.get("schema") == CACHE_SCHEMA:
         age = datetime.now(timezone.utc) - cached["fetched_at"]
         if age < timedelta(days=max_age_days):
-            return cached, False
+            return {**cached,"cache_state":"fresh_cache"}, False
     delay = 30
     for attempt in range(max_retries + 1):
         try:
             data = fetch_symbol(symbol)
             Path(cache_dir).mkdir(parents=True, exist_ok=True)
-            with open(_cache_file(cache_dir, symbol), "wb") as fh:
-                pickle.dump(data, fh)
-            return data, True
+            # Immutable raw record precedes the replaceable convenience cache.
+            payload=pickle.dumps(data,protocol=pickle.HIGHEST_PROTOCOL)
+            digest=hashlib.sha256(payload).hexdigest()
+            snapshots=Path(cache_dir)/"snapshots"/_cache_file(Path(),symbol).stem
+            snapshots.mkdir(parents=True,exist_ok=True)
+            snapshot=snapshots/f"{data['fetched_at'].strftime('%Y%m%dT%H%M%S%f')}-{digest[:12]}.pkl"
+            with snapshot.open("xb") as fh:fh.write(payload)
+            data.update(source_snapshot=str(snapshot),source_sha256=digest)
+            fd,tmp=tempfile.mkstemp(dir=cache_dir,prefix="fetch-",suffix=".tmp")
+            try:
+                with os.fdopen(fd,"wb") as fh:pickle.dump(data,fh)
+                os.replace(tmp,_cache_file(cache_dir,symbol))
+            finally:
+                if os.path.exists(tmp):os.unlink(tmp)
+            return {**data,"cache_state":"fetched"}, True
         except Exception as exc:
             if _is_rate_limit(exc) and attempt < max_retries:
                 log(f"    rate limited on {symbol}; sleeping {delay}s")
@@ -77,25 +102,28 @@ def get(symbol: str, cache_dir: Path, max_age_days: float, max_retries: int, for
                 delay *= 2
                 continue
             log(f"    FAILED {symbol}: {type(exc).__name__}: {exc}")
-            return cached, False  # fall back to stale cache if any
+            return ({**cached,"cache_state":"stale_fallback","refresh_error":f"{type(exc).__name__}: {exc}"}
+                    if cached else None), False
     return cached, False
 
 
-def latest_prices(symbols: list[str]) -> dict[str, float]:
-    """One batched download for current prices (keeps cached fundamentals usable with fresh prices)."""
+def latest_prices(symbols: list[str]) -> dict[str, Observation]:
+    """Dated quotes with contemporaneous market cap/share metadata.
+
+    Refreshing just price would preserve a stale share basis across corporate
+    actions. A failed quote refresh is explicit; caller may display cached data
+    but must not silently turn it into a current candidate.
+    """
     if not symbols:
         return {}
-    df = yf.download(symbols, period="7d", interval="1d", auto_adjust=False, progress=False, threads=True,
-                     group_by="column")
-    if df is None or df.empty:
-        return {}
-    close = df["Close"] if isinstance(df.columns, pd.MultiIndex) else df[["Close"]].rename(columns={"Close": symbols[0]})
     out = {}
     for s in symbols:
-        if s in close:
-            col = close[s].dropna()
-            if len(col):
-                out[s] = float(col.iloc[-1])
+        try:
+            info=yf.Ticker(s).info or {}
+            price=info.get("regularMarketPrice") or info.get("currentPrice")
+            if price and quote_time(info):out[s]=Observation(float(price),quote_time(info),"Yahoo quote",info)
+        except Exception:
+            continue
     return out
 
 
@@ -114,6 +142,11 @@ class FX:
 
     def __init__(self):
         self._rates: dict[tuple[str, str], float] = {}
+        self._dates: dict[tuple[str,str],str|None] = {}
+
+    def observations(self) -> dict:
+        return {f"{a}/{b}":{"rate":v,"as_of":self._dates.get((a,b)),"source":"Yahoo FX"}
+                for (a,b),v in self._rates.items()}
 
     def rate(self, frm: str, to: str) -> float | None:
         frm, to = major_currency(frm)[0], major_currency(to)[0]
@@ -125,14 +158,18 @@ class FX:
         if key not in self._rates:
             try:
                 h = yf.Ticker(f"{frm}{to}=X").history(period="7d", interval="1d")
-                self._rates[key] = float(h["Close"].dropna().iloc[-1]) if len(h) else None
+                clean=h["Close"].dropna() if len(h) else pd.Series(dtype=float)
+                self._rates[key] = float(clean.iloc[-1]) if len(clean) else None
+                self._dates[key] = clean.index[-1].isoformat() if len(clean) else None
             except Exception:
                 self._rates[key] = None
             if self._rates[key] is None:
                 inv = None
                 try:
                     h = yf.Ticker(f"{to}{frm}=X").history(period="7d", interval="1d")
-                    inv = float(h["Close"].dropna().iloc[-1]) if len(h) else None
+                    clean=h["Close"].dropna() if len(h) else pd.Series(dtype=float)
+                    inv = float(clean.iloc[-1]) if len(clean) else None
+                    self._dates[key] = clean.index[-1].isoformat() if len(clean) else None
                 except Exception:
                     pass
                 self._rates[key] = 1.0 / inv if inv else None
