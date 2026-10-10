@@ -9,7 +9,7 @@ import argparse,hashlib,json,math,pickle,sys,tomllib
 from datetime import date
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import pandas as pd
-from screener import metrics,scoring,valuation as V
+from screener import metrics,scoring,valuation as V,inputs
 from screener.__main__ import load_class_overrides
 
 class FrozenFX:
@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--valuation-date',required=True,type=date.fromisoformat,help='Explicit replay date YYYY-MM-DD; does not remove look-ahead from later raw snapshots')
     args=parser.parse_args();root=Path(__file__).resolve().parents[1]
     cfg=tomllib.loads((root/'config.toml').read_text(encoding='utf-8'))
+    cfg['issuer_inputs']=inputs.load(root/cfg['inputs'].get('valuation_overrides','overrides/valuation.toml'))
     overrides=load_class_overrides(root/cfg['inputs']['classification_overrides'])
     fxdata=json.loads(args.fx_json.read_text(encoding='utf-8'));fx=FrozenFX(fxdata)
     rows=[];errors=[];hashes={};invariants=0
@@ -55,6 +56,7 @@ def main():
     summary={'valuation_date':str(args.valuation_date),'records':len(hashes),'successful_computations':len(rows),'funded_path_invariant_checks':invariants,
              'statuses':frame['status'].value_counts().to_dict(),'errors':errors,'source_hashes':hashes,
              'fx_provenance':fxdata.get('_provenance'),'config_sha256':hashlib.sha256((root/'config.toml').read_bytes()).hexdigest(),
+             'issuer_inputs':cfg['issuer_inputs'],'classification_overrides':overrides,
              'limits':'Cached record replay with explicit frozen FX; no current-price or issuer-filing verification and no return backtest.'}
     (args.output_dir/'validation.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
     print(json.dumps({k:v for k,v in summary.items() if k not in ('source_hashes','fx_provenance')},indent=2))

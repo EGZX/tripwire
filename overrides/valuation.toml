@@ -1,4 +1,53 @@
-# Source-backed issuer facts and valuation assumptions. Empty by design.
+# Source-backed issuer evidence. These are data checks, not valuation forecasts.
 # See examples/valuation.toml and docs/valuation-method.md.
 # Personal entries belong in valuation.local.toml (git-ignored).
 [issuers]
+
+[issuers."ASML.AS"]
+source = "ASML Q2 2026 US-GAAP statements pp6/8 and IFRS interim debt note: https://www.investor.asml.com/static-files/5dc79e92-9e59-4a06-af63-22eb4408af16 ; https://www.sec.gov/Archives/edgar/data/937966/000162828026048235/statutoryinterimreport20.htm"
+as_of = "2026-07-15"
+period_end = "2026-06-30" # Yahoo's label for the issuer's June 28 fiscal quarter.
+currency = "EUR"
+statement_rounding_unit = 100000 # EUR millions, one decimal, in the source statements.
+
+[[issuers."ASML.AS".filing_checks]]
+statement = "balance"
+field = "debt"
+period_type = "instant"
+period_end = "2026-06-30"
+reported_period_end = "2026-06-28"
+source_basis = "IFRS"
+provider_basis = "US GAAP"
+value = 3719700000 # IFRS current1,735.3m + noncurrent1,984.4m; reference, not a US-GAAP replacement.
+rounding_unit = 200000 # Sum of two figures rounded to EUR0.1m: total error <=EUR0.1m.
+source = "IFRS-sourced reconciliation reference; June US-GAAP current debt unresolved. Independent US-GAAP annual note corroborates the principal instruments, not exact June carrying amounts: https://www.sec.gov/Archives/edgar/data/937966/000162828026048235/statutoryinterimreport20.htm ; https://www.sec.gov/Archives/edgar/data/937966/000162828026011378/R103.htm"
+
+[issuers.NU]
+source = "Nu Q2 2026 financial statements, Note31 p71: Class A3,808,087,961 +Class B1,022,600,698 common shares; both represent parent equity. https://www.sec.gov/Archives/edgar/data/1691493/000129281426004225/nufs2q26_6k.htm"
+as_of = "2026-08-13"
+period_end = "2026-06-30"
+currency = "USD"
+ownership_reconciled = true
+ownership_common_shares = 4830688659
+capital_scope = "Both parent common-share classes; subsidiary noncontrolling interests are separate. This does not supply regulatory capital forecasts."
+
+[issuers.NVDA]
+source = "NVIDIA FY2027 Q2 GAAP financial statements, USD millions, quarter ended July26/provider July31: https://investor.nvidia.com/news/press-release-details/2026/NVIDIA-Announces-Financial-Results-for-Second-Quarter-Fiscal-2027/"
+as_of = "2026-08-26"
+period_end = "2026-07-31"
+currency = "USD"
+statement_rounding_unit = 1000000
+
+[issuers.JPM]
+source = "JPMorgan Chase Q2 2026 financial supplement, USD millions, published July14: https://www.jpmorganchase.com/content/dam/jpmc/jpmorgan-chase-and-co/investor-relations/documents/quarterly-earnings/2026/2nd-quarter/c9c097af-34e9-4aae-92d2-909a2ab7c083.pdf"
+as_of = "2026-07-14"
+period_end = "2026-06-30"
+currency = "USD"
+statement_rounding_unit = 1000000
+
+[issuers.NEE]
+source = "NextEra Energy Q2 2026 earnings statements, USD millions, published July24: https://www.investor.nexteraenergy.com/~/media/Files/N/NEE-IR/reports-and-fillings/quarterly-earnings/2026/Q2%202026/2026-0724%20NEEQ22026News%20Release%20vFINAL.pdf"
+as_of = "2026-07-24"
+period_end = "2026-06-30"
+currency = "USD"
+statement_rounding_unit = 1000000

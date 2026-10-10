@@ -62,15 +62,20 @@ def capitalization(info: dict, divisor: float, supplied: dict) -> tuple[float,li
 
 def ownership_check(info: dict, common_income: float, consolidated_income: float,
                     supplied: dict) -> str | None:
-    """Detect an aggregate capitalization coupled to parent-only earnings.
+    """Detect cases requiring an economic share-class/partnership reconciliation.
 
     Average statement shares are not substituted for current shares. A mismatch
     triggers reconciliation, not an automatic capitalization rewrite.
     """
     if supplied.get("ownership_reconciled") is True:
+        expected=supplied.get("ownership_common_shares")
+        if expected is not None:
+            aggregate=info.get("impliedSharesOutstanding",info.get("sharesOutstanding"))
+            if not number(aggregate) or not math.isclose(aggregate,expected,rel_tol=IDENTITY_RTOL):
+                return "unresolved ownership scope: current aggregate shares no longer match the sourced common-share reconciliation"
         return None
     common,aggregate=info.get("sharesOutstanding"),info.get("impliedSharesOutstanding")
     if all(number(x) and x>0 for x in (common,aggregate)) and aggregate>common and not math.isclose(common,aggregate,rel_tol=IDENTITY_RTOL):
         if all(number(x) for x in (common_income,consolidated_income)) and not math.isclose(common_income,consolidated_income,rel_tol=IDENTITY_RTOL):
-            return "unresolved ownership scope: aggregate share count with parent-only earnings"
+            return "unresolved ownership scope: multiple share classes or partnership units require economic-rights reconciliation"
     return None

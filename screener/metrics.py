@@ -357,7 +357,26 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
     bal_sel = S.select(balance_sources,balance_required,instant=True)
     cf_sel = S.select([("ttm_cashflow",tc),("cashflow",ac)],("ocf","capex"))
     inc,bal,cfs = inc_sel.frame,bal_sel.frame,cf_sel.frame
-    m["statement_periods"] = json.dumps(S.period_ledger({"income":inc_sel,"balance":bal_sel,"cashflow":cf_sel}),sort_keys=True)
+    selections={"income":inc_sel,"balance":bal_sel,"cashflow":cf_sel}
+    m["statement_periods"] = json.dumps(S.period_ledger(selections),sort_keys=True)
+    m["operating_income_source"] = S.latest_label(inc,"ebit") or "unavailable"
+    reconciliation=[]
+    for name,selection,quarterly,keys in (
+        ("income",inc_sel,data.get("quarterly_income_stmt"),("net_income",) if cls=="financial" else ("revenue","ebit","pretax","tax")),
+        ("cashflow",cf_sel,data.get("quarterly_cashflow"),("ocf","capex"))):
+        rounding=supplied.get("statement_rounding_unit",0.0) if selection.date is not None and str(supplied.get("period_end"))==selection.date.date().isoformat() else 0.0
+        if selection.source.startswith("ttm_"):
+            reconciliation.extend({"statement":name,**c} for c in S.trailing_checks(selection.frame,quarterly,keys,rounding))
+    m["ttm_reconciliation"] = json.dumps(reconciliation,sort_keys=True)
+    if not supplied.get("model") and any(c["status"]=="unreconciled" for c in reconciliation):
+        flags.append("TTM/quarterly inputs unreconciled: rounding or accounting basis needs verification")
+    checks=S.filing_checks(selections,supplied.get("filing_checks",[]))
+    m["filing_reconciliation"]=json.dumps(checks,sort_keys=True)
+    for check in checks:
+        if check["status"]=="contradiction":
+            blockers.append(f"filing contradiction: {check['statement']} {check['field']} at {check['period_end']}")
+        elif check["status"]=="basis_unreconciled":
+            blockers.append(f"filing basis unresolved: {check['statement']} {check['field']} at {check['period_end']}")
     for name,selection in (("income",inc_sel),("balance",bal_sel),("cashflow",cf_sel)):
         if selection.backdated:
             flags.append(f"{name}: coherent older period {selection.date.date()}")
@@ -402,6 +421,18 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
     if not _isnum(equity) and not supplied.get("model") and "marginal_return" not in supplied:
         blockers.append("no book equity figure")
     firm_bridge_needed=supplied.get("model") in ("operating_forecast","regulated_rate_base","finite_project") or (not supplied.get("model") and cls not in ("financial","holdco"))
+    lease_evidence=[]
+    for name,frame in ((bal_sel.source,bal),("quarterly_balance_sheet",qb),("balance_sheet",ab)):
+        values=S.row(frame,"lease_liabilities")
+        value=values.get(bal_sel.date,math.nan) if values is not None else math.nan
+        if _isnum(value):lease_evidence.append({"source":name,"value":float(value)})
+    lease_values={v["value"] for v in lease_evidence}
+    m["lease_liabilities_fc"]=next(iter(lease_values)) if len(lease_values)==1 else math.nan
+    m["lease_evidence"]=json.dumps(lease_evidence,sort_keys=True)
+    lease_reconciled=(supplied.get("lease_cashflow_reconciled",False) and bal_sel.date is not None and inc_sel.date is not None
+                      and str(supplied.get("period_end"))==bal_sel.date.date().isoformat()==inc_sel.date.date().isoformat())
+    if firm_bridge_needed and any(v>0 for v in lease_values) and not lease_reconciled:
+        flags.append("lease/cash-flow basis unreconciled: provider debt may include already-expensed operating leases")
     if firm_bridge_needed and any(_isnum(x) and x<0 for x in (debt,cash,minority,preferred,other_claims)):
         blockers.append("negative cash/debt/noncommon book claim requires reconciliation")
     scope_issue=market.ownership_check(info,ni,_latest(inc,"consolidated_income"),supplied)
@@ -465,6 +496,7 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
     acquisitions=_latest(cfs,"acquisitions")
     m["observed_net_investment"]=-capex-da-working_capital if all(_isnum(x) for x in (capex,da,working_capital)) else math.nan
     m["acquisition_cashflow"]=acquisitions
+    m["acquisition_cashflow_basis"]="provider acquisition category; may include other investments, not independently normalized"
     m["rd_expense"]=_latest(inc,"rd")
 
     # growth inputs

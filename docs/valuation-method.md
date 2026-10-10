@@ -218,3 +218,34 @@ a constant supplied tax rate. It does not infer construction lead times or NOL
 utilization; use a suitable explicit project/regulatory case where those drive
 value. FX timestamps identify provider observations/daily bars, not guaranteed
 synchronized intraday execution prices.
+## Filing reconciliation controls
+
+The October 2026 live audit is documented in
+[live-validation-2026-10-11.md](live-validation-2026-10-11.md), with a public
+fact ledger and locally retained immutable provider/source evidence.
+
+Reported operating profit (`Total Operating Income As Reported`) takes priority
+over provider-standardized operating income and EBIT. Standardization can exclude
+recurring operating costs; any analyst normalization must be justified separately.
+Outputs identify the selected field. Four consecutive quarter totals are compared
+with TTM fields when both exist. Small discrepancies are not silently dismissed:
+an issuer's sourced `statement_rounding_unit` specifies the reporting precision,
+and applies only to the declared period. Five independently rounded observations
+allow at most 2.5 times that unit of aggregate discrepancy.
+
+Optional `filing_checks` declare a statement, field, duration, period, currency
+(inherited from issuer inputs), value, source and optional reported fiscal date.
+Checks never overwrite data. Incomparable declared accounting bases block the
+inference even when numbers agree; a later period does not inherit an earlier
+check. Minimum/maximum checks require an economically valid bound, not a guessed
+replacement value. Cross-basis references must disclose both bases.
+
+Known provider lease obligations trigger a candidate gate unless a sourced
+`lease_cashflow_reconciled` declaration covers the selected income and balance
+period. That declaration must reconcile the treatment of leases in operating
+earnings, capital and noncommon claims; it is not permission to assume lease
+obligations are zero. Complete issuer balance overrides cannot conceal known
+same-period provider leases. Reconciliation needs renewal when periods change.
+For share classes, an optional `ownership_common_shares` count binds a sourced
+ownership clearance to current aggregate common shares; count differences alone
+do not prove that parent earnings have been paired with subsidiary equity.

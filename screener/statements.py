@@ -8,7 +8,9 @@ import pandas as pd
 ROWS = {
     "revenue": ["Total Revenue", "Operating Revenue"],
     "gross": ["Gross Profit"],
-    "ebit": ["Operating Income", "EBIT"],
+    # Standardized Operating Income may exclude recurring operating charges
+    # (e.g. merchant transaction/loan losses). Prefer the reported statement.
+    "ebit": ["Total Operating Income As Reported", "Operating Income", "EBIT"],
     "net_income": ["Net Income Common Stockholders", "Net Income"],
     "pretax": ["Pretax Income"],
     "tax": ["Tax Provision"],
@@ -37,6 +39,7 @@ ROWS.update({
     "consolidated_income": ["Net Income Including Noncontrolling Interests", "Net Income Continuous Operations"],
     "minority_income": ["Minority Interests"],
     "preferred": ["Preferred Stock Equity", "Preferred Stock"],
+    "lease_liabilities": ["Capital Lease Obligations"],
 })
 
 
@@ -79,6 +82,13 @@ def row(df: pd.DataFrame | None, key: str) -> pd.Series | None:
                 if isinstance(summed,pd.Series):
                     summed.index=period_dates(summed.index)
                     result=result.fillna(summed)
+    if key == "lease_liabilities":
+        short,long="Current Capital Lease Obligation","Long Term Capital Lease Obligation"
+        if short in df.index and long in df.index:
+            summed=pd.to_numeric(df.loc[short],errors="coerce")+pd.to_numeric(df.loc[long],errors="coerce")
+            if isinstance(summed,pd.Series):
+                summed.index=period_dates(summed.index)
+                result=result.fillna(summed)
     if key == "minority" and "Total Equity Gross Minority Interest" in df.index:
         common=row(df,"equity")
         if common is not None:
@@ -107,6 +117,80 @@ def latest(df, key) -> float:
     s = row(df,key)
     d = statement_date(df)
     return float(s.get(d,math.nan)) if s is not None and d is not None else math.nan
+
+
+def latest_label(df, key) -> str | None:
+    """Raw alias supporting a directly reported selected field."""
+    if df is None or df.empty:
+        return None
+    for label in ROWS[key]:
+        if label in df.index:
+            single = df.loc[[label]].rename(index={label: ROWS[key][0]})
+            if math.isfinite(latest(single, key)):
+                return label
+    return None
+
+
+def trailing_checks(ttm, quarters, keys, rounding_unit=0.0) -> list[dict]:
+    """Reconcile four consecutive quarters, never sum half-year observations.
+
+    A fiscal quarter spans 12--14 weeks, including 52/53-week calendars. The
+    reporting-rounding allowance must come from a sourced input: five rounded
+    observations (four quarters plus TTM) permit at most 5 * unit / 2 error.
+    Without that evidence, retain even small unexplained differences.
+    """
+    if quarters is None or quarters.empty or statement_date(ttm) is None:
+        return []
+    dates = sorted(set(period_dates(quarters.columns)), reverse=True)[:4]
+    if len(dates) != 4 or dates[0] != statement_date(ttm):
+        return []
+    if any(not 84 <= (a-b).days <= 98 for a,b in zip(dates,dates[1:])):
+        return []
+    checks = []
+    for key in keys:
+        values = row(quarters, key)
+        total = latest(ttm, key)
+        if values is None or not math.isfinite(total):
+            continue
+        values = values.reindex(dates)
+        if values.isna().any():
+            continue
+        summed = math.fsum(values)
+        arithmetic_error = 5 * math.ulp(max(abs(total), *(abs(x) for x in values)))
+        allowance = 2.5 * rounding_unit + arithmetic_error
+        checks.append({"field": key, "period_end": dates[0].date().isoformat(),
+                       "ttm": total, "quarter_sum": summed, "difference": total-summed,
+                       "rounding_unit": rounding_unit, "allowance": allowance,
+                       "status": "ties" if abs(total-summed) <= allowance else "unreconciled"})
+    return checks
+
+
+def filing_checks(selections: dict[str, "Selection"], evidence: list[dict]) -> list[dict]:
+    """Compare sourced facts only with the same period, duration and currency.
+
+    Facts never overwrite provider values. Minimum/maximum claims support facts
+    such as disclosed borrowings without asserting that omitted leases are zero.
+    Currency is checked on the enclosing issuer input by metrics.compute.
+    """
+    results = []
+    for fact in evidence:
+        selection = selections[fact["statement"]]
+        period_type = ("instant" if fact["statement"] == "balance" else
+                       "ttm" if selection.source.startswith("ttm_") else "annual")
+        check = {**fact, "status": "not_applicable"}
+        if selection.date is not None and str(fact["period_end"]) == selection.date.date().isoformat() and fact["period_type"] == period_type:
+            actual = latest(selection.frame, fact["field"])
+            expected = fact["value"]
+            allowance = fact.get("rounding_unit", 0.0) / 2 + 2 * math.ulp(abs(expected))
+            relation = fact.get("relation", "equal")
+            ties = math.isfinite(actual) and (abs(actual-expected) <= allowance if relation == "equal" else
+                    actual >= expected-allowance if relation == "minimum" else actual <= expected+allowance)
+            check.update(provider_value=actual if math.isfinite(actual) else None, allowance=allowance,
+                         status="ties" if ties else "contradiction")
+            if fact.get("source_basis") != fact.get("provider_basis"):
+                check["status"]="basis_unreconciled"
+        results.append(check)
+    return results
 
 
 def annual(df,key) -> pd.Series:

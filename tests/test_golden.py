@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from screener import metrics, scoring
+from screener import metrics, scoring, inputs
 from screener.__main__ import load_class_overrides
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -38,6 +38,7 @@ class FrozenFX:
 def current_snapshot() -> dict:
     with open(ROOT / "config.toml", "rb") as fh:
         cfg = tomllib.load(fh)
+    cfg['issuer_inputs']=inputs.load(ROOT/cfg['inputs'].get('valuation_overrides','overrides/valuation.toml'))
     overrides = load_class_overrides(ROOT / cfg["inputs"]["classification_overrides"])
     rows = []
     for f in sorted(FIXTURES.glob("*.pkl")):

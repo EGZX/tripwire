@@ -28,6 +28,7 @@ CRITICAL_FLAGS = ("stale financials", "no market cap", "check one-offs", "thin c
                   "country exposure unavailable", "short-window cycle proxy", "stale or future quote",
                   "stale or future rates", "rate date unavailable", "filing verification unavailable")
 CRITICAL_FLAGS += ("stale or future FX","FX date unavailable")
+CRITICAL_FLAGS += ("TTM/quarterly inputs unreconciled", "lease/cash-flow basis unreconciled")
 
 
 def percentiles(df: pd.DataFrame, spec: dict, weights: dict) -> pd.DataFrame:

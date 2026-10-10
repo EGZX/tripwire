@@ -10,7 +10,8 @@ FAMILIES={"operating","cyclical","bank","insurer","reit","mortgage_reit","regula
 COMMON={"source","as_of","period_end","currency","model","model_family","base","stress","country_risk_premium",
         "market_cap_quote","market_cap_as_of","market_cap_basis","ownership_reconciled","debt","cash","equity","common_equity","minority","goodwill","preferred","other_claims",
         "tax_rate","marginal_return","terminal_return","discount_rate","discount_rate_basis",
-        "geographic_exposures","capital_scope","forecast_source","sec_cik"}
+        "geographic_exposures","capital_scope","forecast_source","sec_cik",
+        "statement_rounding_unit","filing_checks","lease_cashflow_reconciled","ownership_common_shares"}
 PARAMETERS={"source","revenue","growth","margin_start","margin_terminal","tax_rate","sales_to_capital",
             "maintenance_net_capex","funding_capacity","net_income","available_capital","capital_base",
             "required_capital_ratio","capital_growth","payout_limit","releasable_excess","release_terminal_excess","excess_income_excluded",
@@ -35,6 +36,38 @@ def validate_issuer(symbol:str,p:dict, evaluation_date:date|None=None) -> list[s
     if "model" in p and (not isinstance(p["model"],str) or p["model"] not in MODELS):errors.append(f"{symbol}: unsupported model")
     if "model_family" in p and (not isinstance(p["model_family"],str) or p["model_family"] not in FAMILIES):errors.append(f"{symbol}: unsupported model_family")
     if "ownership_reconciled" in p and not isinstance(p["ownership_reconciled"],bool):errors.append(f"{symbol}: ownership_reconciled must be boolean")
+    if "lease_cashflow_reconciled" in p and not isinstance(p["lease_cashflow_reconciled"],bool):errors.append(f"{symbol}: lease_cashflow_reconciled must be boolean")
+    if "ownership_common_shares" in p and (isinstance(p["ownership_common_shares"],bool) or not isinstance(p["ownership_common_shares"],(int,float)) or not math.isfinite(p["ownership_common_shares"]) or p["ownership_common_shares"]<=0 or p.get("ownership_reconciled") is not True):
+        errors.append(f"{symbol}: ownership_common_shares needs a positive common-share count and sourced ownership reconciliation")
+    if "statement_rounding_unit" in p and (isinstance(p["statement_rounding_unit"],bool) or not isinstance(p["statement_rounding_unit"],(int,float)) or not math.isfinite(p["statement_rounding_unit"]) or p["statement_rounding_unit"]<0):
+        errors.append(f"{symbol}: statement_rounding_unit must be finite and nonnegative")
+    if "filing_checks" in p:
+        from .statements import ROWS
+        checks=p["filing_checks"]
+        if not isinstance(checks,list):errors.append(f"{symbol}: filing_checks must be a list");checks=[]
+        for i,check in enumerate(checks):
+            if not isinstance(check,dict):errors.append(f"{symbol}: filing check {i} must be a table");continue
+            allowed={"statement","field","period_end","reported_period_end","period_type","value","rounding_unit","relation","source","source_basis","provider_basis"}
+            if check.keys()-allowed:errors.append(f"{symbol}: unknown filing-check fields")
+            if check.get("statement") not in ("income","balance","cashflow") or not isinstance(check.get("field"),str) or check["field"] not in ROWS:
+                errors.append(f"{symbol}: unsupported filing-check statement/field")
+            if check.get("period_type") not in ("instant","annual","ttm") or ((check.get("statement")=="balance") != (check.get("period_type")=="instant")):
+                errors.append(f"{symbol}: incompatible filing-check duration")
+            if check.get("relation","equal") not in ("equal","minimum","maximum"):
+                errors.append(f"{symbol}: unsupported filing-check relation")
+            if not isinstance(check.get("source"),str) or not check["source"].strip():errors.append(f"{symbol}: filing check source required")
+            if "source_basis" in check or "provider_basis" in check:
+                if not all(isinstance(check.get(k),str) and check[k].strip() for k in ("source_basis","provider_basis")):
+                    errors.append(f"{symbol}: both source and provider accounting bases are required")
+            for key in ("value","rounding_unit"):
+                value=check.get(key,0 if key=="rounding_unit" else None)
+                if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or (key=="rounding_unit" and value<0):
+                    errors.append(f"{symbol}: invalid filing-check {key}")
+            for key in ("period_end", "reported_period_end"):
+                if key=="reported_period_end" and key not in check:continue
+                try:
+                    if date.fromisoformat(str(check[key]))>date.fromisoformat(str(p["as_of"])):raise ValueError()
+                except (KeyError,ValueError):errors.append(f"{symbol}: invalid filing-check {key}")
     if p.get("market_cap_basis","provider") not in ("provider","listed_shares"):errors.append(f"{symbol}: unsupported market_cap_basis")
     if p.get("market_cap_basis")=="listed_shares" and p.get("ownership_reconciled") is not True:
         errors.append(f"{symbol}: listed_shares requires a sourced ownership reconciliation")
