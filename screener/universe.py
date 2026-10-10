@@ -1,8 +1,17 @@
-"""Build the screening universe from Koyfin watchlist exports, the Parqet holdings snapshot and extra tickers."""
+"""Build the screening universe from two CSV files: the watchlist and the current holdings.
+
+input/watchlist.csv  symbol,name,isin,yahoo_symbol,lists
+    One company per row; give at least one of symbol, isin or yahoo_symbol. A yahoo_symbol is used as is; otherwise
+    the symbol (or ISIN) is resolved to a Yahoo listing, helped by the name. `lists` takes free labels separated
+    by ';' (for example "Core; Semis"); they become filters in the report and dashboard.
+input/holdings.csv   isin,symbol,name,shares,value_eur,cost_eur
+    Your positions. value_eur is the current position value and cost_eur the euro cost basis of the shares held
+    (optional; it enables the score at your cost). A holding attaches to the watchlist row with the same ISIN or
+    symbol, else to a unique company-name match, else it is screened on its own.
+"""
 from __future__ import annotations
 
 import csv
-import glob
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,16 +32,16 @@ _GENERIC = {
 
 @dataclass
 class Entry:
-    key: str                      # stable identity: Koyfin ticker, ISIN, or Yahoo symbol for extras
+    key: str                      # stable identity: watchlist symbol, else ISIN, else Yahoo symbol
     name: str
-    ticker: str = ""              # Koyfin ticker (no exchange suffix)
+    ticker: str = ""              # symbol as written in the input (exchange suffix optional)
     isin: str = ""
     yahoo: str = ""               # resolved Yahoo symbol
     skipped: bool = False         # excluded via overrides (ETFs, funds, ...)
     lists: set[str] = field(default_factory=set)
     owned: bool = False
     shares: float = 0.0
-    cost_eur: float = 0.0         # euro cost basis of the current shares (Parqet); 0 = unknown
+    cost_eur: float = 0.0         # euro cost basis of the current shares; 0 = unknown
     position_eur: float = 0.0
 
     @property
@@ -69,64 +78,63 @@ def names_match(a: str, b: str) -> bool:
     return small <= large
 
 
-def load_koyfin(pattern: str) -> list[Entry]:
-    """Parse Koyfin watchlist CSV exports. Group header rows (single cell) become list labels."""
+def _rows(path: Path) -> list[dict]:
+    return [{k.strip().lower(): (v or "").strip() for k, v in r.items() if k}
+            for r in csv.DictReader(read_text(Path(path)).splitlines())]
+
+
+def _num(v: str) -> float:
+    try:
+        return float(v.replace(",", "")) if v else 0.0
+    except ValueError:
+        return 0.0
+
+
+def load_watchlist(path: Path) -> list[Entry]:
+    """Watchlist rows; duplicates of the same company merge their list labels."""
+    if not Path(path).exists():
+        return []
     entries: dict[str, Entry] = {}
-    for path in sorted(glob.glob(pattern)):
-        group = Path(path).stem
-        for row in csv.reader(read_text(Path(path)).splitlines()):
-            cells = [c.strip() for c in row]
-            if not cells or not cells[0]:
-                continue
-            if cells[0] == "Ticker" or cells[0].startswith(("Weighted Average", "Median")):
-                continue
-            if len(cells) == 1 or not any(cells[1:]):
-                group = cells[0]
-                continue
-            ticker, name = cells[0], cells[1]
-            e = entries.setdefault(ticker, Entry(key=ticker, name=name, ticker=ticker))
-            e.lists.add(f"Koyfin: {group}")
+    for r in _rows(path):
+        sym, isin, ysym = r.get("symbol", ""), r.get("isin", "").upper(), r.get("yahoo_symbol", "")
+        key = sym or isin or ysym
+        if not key:
+            continue
+        e = entries.setdefault(key, Entry(key=key, name=r.get("name") or key, ticker=sym, isin=isin, yahoo=ysym))
+        e.lists |= {x.strip() for x in r.get("lists", "").split(";") if x.strip()} or {"Watchlist"}
     return list(entries.values())
 
 
-def load_parqet(path: Path) -> list[Entry]:
+def load_holdings(path: Path) -> list[Entry]:
     if not Path(path).exists():
         return []
     out = []
-    for row in csv.DictReader(read_text(Path(path)).splitlines()):
-        isin = row["isin"].strip()
-        out.append(Entry(key=isin, name=row["name"].strip(), isin=isin, owned=True,
-                         shares=float(row.get("shares") or 0), position_eur=float(row.get("value_eur") or 0),
-                         cost_eur=float(row.get("cost_eur") or 0),
-                         lists={"Parqet"}))
+    for r in _rows(path):
+        isin, sym = r.get("isin", "").upper(), r.get("symbol", "")
+        if not (isin or sym):
+            continue
+        out.append(Entry(key=isin or sym, name=r.get("name") or isin or sym, ticker=sym, isin=isin, owned=True,
+                         shares=_num(r.get("shares", "")), position_eur=_num(r.get("value_eur", "")),
+                         cost_eur=_num(r.get("cost_eur", "")), lists={"Holdings"}))
     return out
 
 
-def load_extra(path: Path) -> list[Entry]:
-    if not Path(path).exists():
-        return []
-    out = []
-    for row in csv.DictReader(read_text(Path(path)).splitlines()):
-        sym = (row.get("yahoo_symbol") or "").strip()
-        if sym:
-            out.append(Entry(key=sym, name=(row.get("name") or sym).strip(), yahoo=sym, lists={"Extra"}))
-    return out
-
-
-def merge(koyfin: list[Entry], parqet: list[Entry], extra: list[Entry]) -> list[Entry]:
-    """Attach Parqet positions to the Koyfin entry with the same company name (exactly one match);
-    unmatched holdings stay as separate ISIN entries and are de-duplicated after symbol resolution."""
-    merged = list(koyfin)
-    for p in parqet:
-        hits = [k for k in koyfin if names_match(p.name, k.name)]
+def merge(watchlist: list[Entry], holdings: list[Entry]) -> list[Entry]:
+    """Attach each holding to its watchlist row (same ISIN, else same symbol, else exactly one company-name match);
+    unmatched holdings stay as their own entries and are de-duplicated after symbol resolution."""
+    merged = list(watchlist)
+    for p in holdings:
+        hits = [w for w in watchlist if p.isin and w.isin == p.isin]
+        hits = hits or [w for w in watchlist if p.ticker and p.ticker in (w.ticker, w.yahoo)]
+        hits = hits or [w for w in watchlist if names_match(p.name, w.name)]
         if len(hits) == 1:
-            k = hits[0]
-            k.owned, k.shares, k.position_eur, k.isin = True, p.shares, p.position_eur, p.isin
-            k.cost_eur = p.cost_eur
-            k.lists |= p.lists
+            w = hits[0]
+            w.owned, w.shares, w.position_eur, w.cost_eur = True, p.shares, p.position_eur, p.cost_eur
+            w.isin = w.isin or p.isin
+            w.lists |= p.lists
         else:
             merged.append(p)
-    return merged + extra
+    return merged
 
 
 def dedupe_by_symbol(entries: list[Entry]) -> list[Entry]:

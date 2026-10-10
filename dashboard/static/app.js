@@ -651,7 +651,7 @@ function viewHoldings() {
     card("Holdings value by status", "", statusBar(byStatus, total), {}),
     h("section", { class: "card" }, h("div", { class: "card-head" }, h("h3", { text: "Positions" }), null),
       h("div", { class: "card-body flush" }, table(owned, [C.symbol, C.name, C.status, posCol, wCol, C.score, C.price, C.ceiling, C.ccy, C.head, C.spread], S.holdSort,
-        { empty: "No holdings in this run. Refresh input/parqet_holdings.csv and run the screener." }))),
+        { empty: "No holdings in this run. Fill input/holdings.csv and run the screener." }))),
     entriesCard(owned)];
 }
 
@@ -659,7 +659,7 @@ function viewHoldings() {
 function entriesCard(owned) {
   const rows = owned.filter((r) => ok(r.cost_px));
   const scored = rows.filter((r) => ok(r.cost_score) && ok(r.entry_score));
-  if (!rows.length) return card("Your entries", "", h("div", { class: "empty", text: "No cost basis yet: add cost_eur to input/parqet_holdings.csv and rerun the screener." }));
+  if (!rows.length) return card("Your entries", "", h("div", { class: "empty", text: "No cost basis yet: add cost_eur to input/holdings.csv and rerun the screener." }));
   const vScored = sum(scored.map((r) => num(r.position_eur)));
   const vBelow = sum(scored.filter((r) => num(r.cost_score) >= 0).map((r) => num(r.position_eur)));
   const gain = (r) => ok(r.cost_eur) && num(r.cost_eur) > 0 ? num(r.position_eur) / num(r.cost_eur) - 1 : NaN;
@@ -668,7 +668,7 @@ function entriesCard(owned) {
     C.price, C.ceiling, C.ccy,
     { key: "cost_score", label: "Score at your cost", num: true, title: "100 × (1 − your avg cost / today's max entry price)", fmt: (r) => scoreCell(r.cost_score), sort: (r) => num(r.cost_score) },
     C.score,
-    { key: "gain", label: "Since purchase", num: true, title: "Position value / cost basis − 1, in euro (Parqet)", fmt: (r) => fmtSignedPct(gain(r)), sort: (r) => gain(r), cellCls: (r) => gain(r) >= 0 ? "pos-text" : "neg-text" },
+    { key: "gain", label: "Since purchase", num: true, title: "Position value / cost basis − 1, in euro", fmt: (r) => fmtSignedPct(gain(r)), sort: (r) => gain(r), cellCls: (r) => gain(r) >= 0 ? "pos-text" : "neg-text" },
     C.pos];
   return h("div", { class: "grid", style: { gap: "8px" } },
     card("Your entries vs today", vScored > 0 ? fmtPct(vBelow / vScored, 0) + " of scored value bought at or below today's max entry" : "",

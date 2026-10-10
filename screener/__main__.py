@@ -45,9 +45,11 @@ def main(argv: list[str] | None = None) -> int:
     t0 = time.time()
     log = lambda msg: print(msg, flush=True)
 
-    entries = universe.merge(universe.load_koyfin(str(ROOT / ic["koyfin_glob"])),
-                             universe.load_parqet(ROOT / ic["parqet_holdings"]),
-                             universe.load_extra(ROOT / ic["extra_tickers"]))
+    entries = universe.merge(universe.load_watchlist(ROOT / ic["watchlist"]),
+                             universe.load_holdings(ROOT / ic["holdings"]))
+    if not entries:
+        log(f"No input: create {ic['watchlist']} (and optionally {ic['holdings']}); see examples/")
+        return 1
     log(f"Universe: {len(entries)} entries before symbol resolution")
     res_rows = resolve.resolve(entries, ROOT / ic["symbol_overrides"], data_dir / "symbol_map.csv", log=log)
     entries = universe.dedupe_by_symbol(entries)

@@ -1,7 +1,6 @@
-# personal data and generated output stay local
-input/koyfin/*.csv
-input/parqet_holdings.csv
-input/extra_tickers.csv
+# personal data and generated output stay local (templates live in examples/)
+input/
+local/
 data/
 reports/
 .venv/

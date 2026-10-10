@@ -1,7 +1,7 @@
 [project]
 name = "tripwire"
 version = "0.1.0"
-description = "Weekly entry-price screener for a stock watchlist (Koyfin export + Parqet holdings) on free Yahoo Finance data, with a local dashboard"
+description = "Weekly entry-price screener for a stock watchlist on free Yahoo Finance data, with a local dashboard"
 requires-python = ">=3.12"
 dependencies = [
     "yfinance==1.7.0",

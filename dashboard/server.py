@@ -19,6 +19,7 @@ from .data import Store
 
 STATIC = Path(__file__).resolve().parent / "static"
 LOOPBACK = {"127.0.0.1", "localhost", "[::1]"}
+LOOPBACK_BIND = {"127.0.0.1", "localhost", "::1"}
 MAX_BODY = 256 * 1024
 # headers a reverse proxy adds (Tailscale Serve identity, cloudflared, nginx/Caddy); their presence means the request
 # came from another machine even though the socket peer is loopback, and the Host header is client-controlled
@@ -63,7 +64,9 @@ def make_handler(store: Store, quiet: bool = True, allowed_hosts: tuple[str, ...
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Security-Policy",
                              "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
-                             "connect-src 'self'; frame-ancestors 'none'")
+                             "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Cross-Origin-Opener-Policy", "same-origin")
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(body)
@@ -175,7 +178,14 @@ def make_handler(store: Store, quiet: bool = True, allowed_hosts: tuple[str, ...
 
 
 def serve(store: Store, host: str, port: int, quiet: bool = True, allowed_hosts: tuple[str, ...] = (),
-          base_path: str = "", read_only: bool = False, allow_remote_edit: bool = False) -> ThreadingHTTPServer:
+          base_path: str = "", read_only: bool = False, allow_remote_edit: bool = False,
+          unsafe_bind: bool = False) -> ThreadingHTTPServer:
+    """Refuses a non-loopback bind unless unsafe_bind: the Host check stops browsers (DNS rebinding), not other
+    machines, which can simply send "Host: 127.0.0.1" and read every run, holdings included. To reach the dashboard
+    from elsewhere, keep it on loopback and put a private reverse proxy (Tailscale Serve) in front."""
+    if host not in LOOPBACK_BIND and not unsafe_bind:
+        raise ValueError(f"refusing to bind {host!r}: the dashboard has no login and would expose your data to the "
+                         "network. Keep it on 127.0.0.1 behind a private proxy, or pass unsafe_bind (--unsafe-bind).")
     mimetypes.add_type("text/javascript", ".js")
     mimetypes.add_type("text/css", ".css")
     httpd = ThreadingHTTPServer((host, port), make_handler(store, quiet, allowed_hosts, base_path, read_only, allow_remote_edit))

@@ -315,7 +315,7 @@ def test_cost_basis_scores_your_buy_price_against_todays_ceiling():
 
 def test_cost_basis_skips_when_units_disagree_or_inputs_missing():
     fx = _FX({("USD", "EUR"): 0.80})
-    # Parqet says EUR 40 per share, Yahoo USD 150 = EUR 120: a different unit (e.g. GDR ratio) -> no score
+    # the holdings file says EUR 40 per share, Yahoo USD 150 = EUR 120: a different unit (e.g. GDR ratio) -> no score
     out = metrics.cost_basis(150.0, 125.0, "USD", 10, 800.0, 400.0, fx)
     assert "cost_score" not in out and "disagree" in out["cost_flag"]
     assert metrics.cost_basis(150.0, 125.0, "USD", 10, 0.0, 1200.0, fx) == {}        # no cost basis known

@@ -176,7 +176,7 @@ def write(df: pd.DataFrame, resolution: pd.DataFrame, out_dir: Path, history_dir
     other = df[~df["class"].isin(["operating", "cyclical", "financial", "preprofit"])]
     cands = df[df["candidate"].fillna(False).astype(bool)]
     if len(resolution):
-        auto = resolution["method"] != "override"  # deliberate overrides/skips need no review
+        auto = ~resolution["method"].isin(["override", "given"])  # deliberate mappings need no review
         sym_check = resolution[auto & ((resolution["similarity"] < 0.5) | (resolution["yahoo"] == ""))]
     else:
         sym_check = resolution

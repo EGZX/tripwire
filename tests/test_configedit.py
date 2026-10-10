@@ -9,7 +9,7 @@ from dashboard import configedit as CE
 SAMPLE = '''# Screener configuration.
 
 [inputs]
-koyfin_glob = "input/koyfin/*.csv"   # keep
+watchlist = "input/watchlist.csv"   # keep
 
 [valuation]
 equity_risk_premium = 0.045    # hurdle = currency risk-free + this
@@ -44,7 +44,7 @@ def test_plan_edits_values_in_place_and_keeps_everything_else():
     assert cfg["valuation"]["stale_after_days"] == 300
     assert cfg["valuation"]["adverse_growth_mode"] == "haircut"
     assert "# hurdle = currency risk-free + this" in p.text          # comments survive
-    assert "# rates comment stays" in p.text and 'koyfin_glob = "input/koyfin/*.csv"   # keep' in p.text
+    assert "# rates comment stays" in p.text and 'watchlist = "input/watchlist.csv"   # keep' in p.text
     assert cfg["valuation"]["years"] == 10 and cfg["scoring"]["w_value"] == 0.40
     assert {(c["section"], c["key"]) for c in p.changes} == {("valuation", "equity_risk_premium"), ("valuation", "stale_after_days"), ("valuation", "adverse_growth_mode")}
     assert any(c["old"] == 0.045 and c["new"] == 0.05 for c in p.changes)

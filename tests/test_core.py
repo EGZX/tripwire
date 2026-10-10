@@ -16,48 +16,67 @@ def test_zero_growth_perpetuity_matches_closed_form():
 
 
 # ---------------- universe parsing / matching
-KOYFIN = """Ticker,Name,Market Cap,Last Price
-Not owned
-RHM,Rheinmetall AG,N/A,1.0
-700,Tencent Holdings Limited,N/A,1.0
-Weighted Average  ,-
-Owned
-ADBE,Adobe Inc.,N/A,1.0
-Median  ,-
+WATCHLIST = """symbol,name,isin,yahoo_symbol,lists
+RHM,Rheinmetall AG,,,Core; Defence
+700,Tencent Holdings Limited,,0700.HK,Core
+,Siemens AG,DE0007236101,,
+RHM,Rheinmetall AG,,,Momentum
+,,,,
+"""
+HOLDINGS = """isin,symbol,name,shares,value_eur,cost_eur
+US0378331005,,Apple Inc.,10,"1,850.00",1200
+DE0007236101,,Siemens AG,5,1000,
 """
 
 
-def test_load_koyfin_groups(tmp_path):
-    f = tmp_path / "k.csv"
-    f.write_text(KOYFIN, encoding="utf-8")
-    entries = {e.ticker: e for e in universe.load_koyfin(str(tmp_path / "*.csv"))}
-    assert set(entries) == {"RHM", "700", "ADBE"}
-    assert entries["ADBE"].lists == {"Koyfin: Owned"}
-    assert entries["RHM"].lists == {"Koyfin: Not owned"}
+def test_load_watchlist_merges_lists_and_keeps_given_symbols(tmp_path):
+    f = tmp_path / "watchlist.csv"
+    f.write_text(WATCHLIST, encoding="utf-8")
+    entries = {e.key: e for e in universe.load_watchlist(f)}
+    assert set(entries) == {"RHM", "700", "DE0007236101"}             # blank row skipped, duplicate merged
+    assert entries["RHM"].lists == {"Core", "Defence", "Momentum"}
+    assert entries["700"].yahoo == "0700.HK" and entries["700"].ticker == "700"
+    assert entries["DE0007236101"].lists == {"Watchlist"} and entries["DE0007236101"].isin == "DE0007236101"
+    assert universe.load_watchlist(tmp_path / "missing.csv") == []
+
+
+def test_load_holdings_parses_numbers(tmp_path):
+    f = tmp_path / "holdings.csv"
+    f.write_text(HOLDINGS, encoding="utf-8")
+    h = universe.load_holdings(f)
+    assert [e.key for e in h] == ["US0378331005", "DE0007236101"] and all(e.owned for e in h)
+    assert h[0].position_eur == 1850.0 and h[0].cost_eur == 1200.0 and h[1].cost_eur == 0.0
 
 
 @pytest.mark.parametrize("a,b,expected", [
-    ("Adobe Systems", "Adobe Inc.", True),
-    ("Kaspi.kz", "Joint Stock Company Kaspi.kz", True),
-    ("NAC Kazatomprom GDR", "National Atomic Company Kazatomprom JSC", True),
-    ("Eli Lilly & Co", "Eli Lilly and Company", True),
-    ("TSMC (ADR)", "Taiwan Semiconductor Manufacturing Company Limited", False),
-    ("S&P Global", "Moody's Corporation", False),
-    ("Meta Platforms", "Microsoft Corporation", False),
+    ("Siemens", "Siemens Aktiengesellschaft", True),
+    ("Unilever PLC", "Unilever", True),
+    ("Procter & Gamble", "The Procter and Gamble Company", True),
+    ("Toyota Motor ADR", "Toyota Motor Corporation", True),
+    ("BMW", "Bayerische Motoren Werke AG", False),        # abbreviations need a symbol or ISIN
+    ("Ford Motor Company", "Toyota Motor Corporation", False),
+    ("Apple Inc.", "Applied Materials Inc.", False),
 ])
 def test_names_match(a, b, expected):
     assert universe.names_match(a, b) is expected
 
 
-def test_merge_attaches_position_and_dedupe():
-    k = [universe.Entry(key="AAPL", name="Apple Inc.", ticker="AAPL", lists={"Koyfin: Owned"})]
-    p = [universe.Entry(key="US0378331005", name="Apple", isin="US0378331005", owned=True,
-                        position_eur=1000.0, lists={"Parqet"}),
-         universe.Entry(key="DE0007236101", name="Siemens AG", isin="DE0007236101", owned=True, lists={"Parqet"})]
-    merged = universe.merge(k, p, [])
-    assert len(merged) == 2 and merged[0].owned and merged[0].position_eur == 1000.0
-    merged[0].yahoo, merged[1].yahoo = "AAPL", "AAPL"
-    assert len(universe.dedupe_by_symbol(merged)) == 1
+def test_merge_attaches_holdings_by_isin_symbol_or_name():
+    w = [universe.Entry(key="AAPL", name="Apple Inc.", ticker="AAPL", lists={"Core"}),
+         universe.Entry(key="SIE", name="Siemens", ticker="SIE", isin="DE0007236101", lists={"Core"}),
+         universe.Entry(key="NOVO", name="Novo Nordisk", ticker="NOVO", lists={"Core"})]
+    h = [universe.Entry(key="US0378331005", name="Apple", isin="US0378331005", owned=True, position_eur=1000.0,
+                        lists={"Holdings"}),                                              # by name
+         universe.Entry(key="DE0007236101", name="Siemens AG (reg.)", isin="DE0007236101", owned=True,
+                        lists={"Holdings"}),                                              # by ISIN
+         universe.Entry(key="NOVO", name="Novo B", ticker="NOVO", owned=True, lists={"Holdings"}),   # by symbol
+         universe.Entry(key="JP3633400001", name="Unmatched Co", isin="JP3633400001", owned=True, lists={"Holdings"})]
+    merged = universe.merge(w, h)
+    assert len(merged) == 4 and all(e.owned for e in merged)
+    assert merged[0].position_eur == 1000.0 and merged[0].isin == "US0378331005"
+    assert merged[0].lists == {"Core", "Holdings"}
+    merged[0].yahoo, merged[3].yahoo = "AAPL", "AAPL"
+    assert len(universe.dedupe_by_symbol(merged)) == 3
 
 
 def test_base_symbol_and_minor_currency():

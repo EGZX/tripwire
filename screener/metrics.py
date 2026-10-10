@@ -113,7 +113,7 @@ def _cagr(series: pd.Series, max_years: int = 3) -> float:
     return (last / first) ** (1 / years) - 1
 
 
-UNIT_TOLERANCE = 0.15  # Parqet's euro price vs Yahoo's price at today's FX; beyond this the units differ (GDR ratio, wrong line)
+UNIT_TOLERANCE = 0.15  # holdings-file euro price vs Yahoo's price at today's FX; beyond this the units differ (GDR ratio)
 
 
 def cost_basis(price: float, ceiling_px: float, quote_ccy: str, shares: float, cost_eur: float,
@@ -122,14 +122,14 @@ def cost_basis(price: float, ceiling_px: float, quote_ccy: str, shares: float, c
 
     cost_px = euro cost per share converted at today's rate, so the comparison is "is the business worth more today,
     in euro, than the euro you paid" (currency moves since purchase included). cost_score uses the entry-score formula.
-    Dropped with a flag when Parqet's euro price per share and Yahoo's price disagree beyond UNIT_TOLERANCE."""
+    Dropped with a flag when the holdings file's euro price per share and Yahoo's price disagree beyond UNIT_TOLERANCE."""
     if not (_isnum(cost_eur) and cost_eur > 0 and _isnum(shares) and shares > 0 and _isnum(price) and price > 0):
         return {}
     rate = fx.rate(quote_ccy, "EUR") if quote_ccy else None
     if not rate:
         return {"cost_flag": f"no FX rate {quote_ccy}->EUR"}
     if _isnum(value_eur) and value_eur > 0 and abs((value_eur / shares) / (price * rate) - 1) > UNIT_TOLERANCE:
-        return {"cost_flag": "Parqet and Yahoo prices disagree (units or listing); cost score skipped"}
+        return {"cost_flag": "holdings-file and Yahoo prices disagree (units or listing); cost score skipped"}
     cost_px = cost_eur / shares / rate
     return {"cost_px": cost_px, "cost_score": entry_score(cost_px, ceiling_px) if _isnum(ceiling_px) else math.nan}
 

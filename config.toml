@@ -1,9 +1,8 @@
 # Screener configuration. Paths are relative to the repository root.
 
 [inputs]
-koyfin_glob = "input/koyfin/*.csv"            # drop any number of Koyfin watchlist exports here
-parqet_holdings = "input/parqet_holdings.csv" # isin,name,shares,value_eur  (current holdings)
-extra_tickers = "input/extra_tickers.csv"     # optional: yahoo_symbol,name
+watchlist = "input/watchlist.csv"   # symbol,name,isin,yahoo_symbol,lists   (see examples/)
+holdings = "input/holdings.csv"     # isin,symbol,name,shares,value_eur,cost_eur   (optional)
 symbol_overrides = "overrides/symbols.csv"
 classification_overrides = "overrides/classification.csv"
 

@@ -1,16 +1,29 @@
 # Tripwire
 
-A weekly entry-price screener for a stock watchlist, built on free Yahoo Finance data. Every company gets a **max entry price** from a funded-growth valuation; Tripwire fires on the names trading at or below it, and a local dashboard shows how far the rest would have to fall. The watchlist comes from Koyfin exports plus Parqet holdings.
+A weekly entry-price screener for a stock watchlist, built on free Yahoo Finance data. Every company gets a **max entry price** from a funded-growth valuation; Tripwire fires on the names trading at or below it, and a local dashboard shows how far the rest would have to fall. You provide two CSV files: a watchlist and, optionally, your holdings.
 
 It is a **triage tool**. It decides which companies deserve a full valuation; it does not produce buy signals.
+
+## Setup
+
+```powershell
+git clone https://github.com/EGZX/tripwire.git
+cd tripwire
+py -3.12 -m venv .venv
+.venv\Scripts\python -m pip install -e ".[dev]"
+mkdir input
+copy examples\watchlist.csv input\          # then replace with your own companies
+copy examples\holdings.csv input\           # optional: your positions
+```
+
+On macOS or Linux use `python3.12 -m venv .venv`, `.venv/bin/python` and `cp`.
 
 ## Run
 
 ```powershell
-cd tripwire
 .venv\Scripts\python -m screener                 # weekly run; uses cached fundamentals less than 6 days old
 .venv\Scripts\python -m screener --refresh       # refetch everything
-.venv\Scripts\python -m screener --only ADBE,RHM.DE   # a few symbols (results are identical to the full run)
+.venv\Scripts\python -m screener --only AAPL,SIE.DE   # a few symbols (results are identical to the full run)
 .venv\Scripts\python -m screener --resolve-only  # only map tickers to Yahoo symbols
 ```
 
@@ -35,14 +48,13 @@ A CSV copy of each run is kept in `data/history/`. Runs are never overwritten: a
 
 | What | Where | Notes |
 |---|---|---|
-| Koyfin watchlists | `input/koyfin/*.csv` | Drop in any number of exports. Group rows such as "Owned" or "Not owned" become list labels. |
-| Current holdings | `input/parqet_holdings.csv` | Columns `isin,name,shares,value_eur`, optional `cost_eur` (euro cost basis of the shares held; Parqet: current value − unrealized gain). With it, holdings get a *score at your cost*: your average buy price against today's max entry price. Parqet is the source of truth for "owned". Refresh it by asking Claude to update the file from the Parqet connector, or edit it by hand. |
-| Extra symbols | `input/extra_tickers.csv` | Columns `yahoo_symbol,name`, for names not in Koyfin. |
-| Symbol fixes | `overrides/symbols.csv` | Maps `source_key` (Koyfin ticker or ISIN) to a Yahoo symbol, or to `SKIP`. Check the "Symbol check" sheet after adding names. |
+| Watchlist | `input/watchlist.csv` | Columns `symbol,name,isin,yahoo_symbol,lists`. Give at least one of `symbol`, `isin` or `yahoo_symbol` per company; a `yahoo_symbol` is used as is, anything else is resolved to a Yahoo listing (the name helps). `lists` takes free labels separated by `;` (e.g. `Core; Semis`), which become filters in the report and dashboard. Template: `examples/watchlist.csv`. |
+| Holdings | `input/holdings.csv` | Optional. Columns `isin,symbol,name,shares,value_eur,cost_eur`: current position value and the euro cost basis of the shares held. A holding attaches to the watchlist row with the same ISIN or symbol (else a unique name match) and is screened on its own if not on the watchlist. With `cost_eur`, holdings get a *score at your cost*: your average buy price against today's max entry price. Template: `examples/holdings.csv`. |
+| Symbol fixes | `overrides/symbols.csv` | Maps `source_key` (a watchlist symbol or an ISIN) to a Yahoo symbol, or to `SKIP`. Rows you would rather not share (for example ISINs of your own positions) go in `overrides/symbols.local.csv`, which is read too and git-ignored. Check the "Symbol check" sheet after adding names. |
 | Class fixes | `overrides/classification.csv` | Forces `operating`, `cyclical`, `financial`, `holdco` or `fund`. |
 | Parameters | `config.toml` | Equity risk premium, adverse-case settings, horizon and caps, and the **per-currency rates table** (10-year yield, terminal growth, country risk premium, `as_of` date). Update the table when rates move, by hand or in the dashboard's Method view (see `dashboard/README.md`). The run refuses to start if a reporting currency in the universe is missing from it or a rate is malformed. |
 
-Input files are git-ignored because they contain personal holdings. The `overrides/` files are versioned.
+`input/` is git-ignored: your watchlist and positions never leave your machine. The shared `overrides/` files are versioned.
 
 ## Method
 

@@ -19,7 +19,9 @@ DEFAULT_PORT = 8765  # clear of the usual dev-server ports (8000, 8080, 5173)
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="dashboard", description=__doc__)
     ap.add_argument("--root", default=str(ROOT), help="screener checkout holding data/history and config.toml")
-    ap.add_argument("--host", default="127.0.0.1", help="bind address (keep it on loopback)")
+    ap.add_argument("--host", default="127.0.0.1", help="bind address; anything but loopback needs --unsafe-bind")
+    ap.add_argument("--unsafe-bind", action="store_true",
+                    help="allow a non-loopback --host: everyone who can reach it can read your data (no login)")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--allow-host", action="append", default=[], metavar="NAME",
                     help="also accept this Host header, e.g. the machine's Tailscale name (repeatable)")
@@ -28,13 +30,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--verbose", action="store_true", help="log every request")
     ap.add_argument("--read-only", action="store_true", help="disable config editing entirely")
     ap.add_argument("--allow-remote-edit", action="store_true",
-                    help="accept config edits from --allow-host names too (default: only from this machine)")
+                    help="accept config edits through a proxy / from --allow-host names too: anyone who can reach the "
+                         "dashboard can then change config.toml (default: only from this machine)")
     args = ap.parse_args(argv)
 
     store = Store(Path(args.root))
     try:
         httpd = serve(store, args.host, args.port, quiet=not args.verbose, allowed_hosts=tuple(args.allow_host),
-                      base_path=args.base_path, read_only=args.read_only, allow_remote_edit=args.allow_remote_edit)
+                      base_path=args.base_path, read_only=args.read_only, allow_remote_edit=args.allow_remote_edit,
+                      unsafe_bind=args.unsafe_bind)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
     except OSError as exc:
         print(f"Cannot bind {args.host}:{args.port} ({exc}). Is it already running? Try --port.", file=sys.stderr)
         return 1

@@ -168,3 +168,22 @@ def test_same_day_reruns_are_runs_in_order(root):
     assert st.run_payload("2026-10-10_2")["previous"] == "2026-10-10_1"
     with pytest.raises(KeyError):
         st.load("2026-10-10_x")
+
+
+def test_non_loopback_bind_is_refused_unless_explicit(root):
+    with pytest.raises(ValueError, match="refusing to bind"):
+        serve(Store(root), "0.0.0.0", 0)
+    httpd = serve(Store(root), "0.0.0.0", 0, unsafe_bind=True)   # explicit opt-in still works
+    httpd.server_close()
+
+
+def test_security_headers_are_sent(root):
+    httpd = serve(Store(root), "127.0.0.1", 0)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        r = urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_address[1]}/")
+        csp = r.headers["Content-Security-Policy"]
+        assert "frame-ancestors 'none'" in csp and "base-uri 'none'" in csp and "script-src 'self'" in csp
+        assert r.headers["Referrer-Policy"] == "no-referrer" and r.headers["X-Content-Type-Options"] == "nosniff"
+    finally:
+        httpd.shutdown(); httpd.server_close()

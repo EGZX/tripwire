@@ -60,7 +60,7 @@ def _search(query: str) -> list[dict]:
 
 
 def _pick(quotes: list[dict], ticker: str, name: str) -> dict | None:
-    """Prefer listings whose base symbol equals the Koyfin ticker; among them prefer non-OTC, Yahoo's order."""
+    """Prefer listings whose base symbol equals the input symbol; among them prefer non-OTC, Yahoo's order."""
     want = base_symbol(ticker) if ticker else ""
     same = [q for q in quotes if want and base_symbol(q["symbol"]) == want]
     for pool in ([q for q in same if q.get("exchange") not in OTC], same):
@@ -99,8 +99,8 @@ def resolve(entries: list[Entry], overrides_path: Path, cache_path: Path, log=pr
     cache = load_cache(cache_path)
     report = []
     for e in entries:
-        if e.yahoo:  # extra tickers are already Yahoo symbols
-            report.append({"key": e.key, "name": e.name, "yahoo": e.yahoo, "method": "extra"})
+        if e.yahoo:  # yahoo_symbol given in the watchlist
+            report.append({"key": e.key, "name": e.name, "yahoo": e.yahoo, "method": "given"})
             continue
         ov = overrides.get(e.ticker) or overrides.get(e.isin) or overrides.get(e.key)
         if ov:
