@@ -29,7 +29,7 @@ stale_after_days = 270
 [rates]
 USD = { rf = 0.0524, g = 0.030, as_of = "2026-10-10" }
 EUR = { rf = 0.027, g = 0.020, as_of = "2026-10-10" }   # trailing comment
-KZT = { rf = 0.140, g = 0.060, crp = 0.030, as_of = "2026-10-10" }
+KZT = { rf = 0.140, g = 0.060, as_of = "2026-10-10" }
 
 [scoring]
 w_value = 0.40

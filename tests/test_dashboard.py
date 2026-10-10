@@ -82,7 +82,7 @@ def test_symbol_history_and_config(root):
     pts = st.symbol_history("AAA")["points"]
     assert [p["price"] for p in pts] == [110.0, 88.0]
     rates = st.config_payload()["rates"]
-    assert rates[0]["hurdle"] == pytest.approx(0.095) and rates[0]["floor"] == pytest.approx(0.05)
+    assert rates[0]["hurdle"] == pytest.approx(0.095) and rates[0]["floor"] == pytest.approx(0.095)
 
 
 def test_unknown_or_malformed_run_is_rejected(root):
@@ -126,9 +126,9 @@ def test_derived_rates_mirror_the_screener():
     v = {"equity_risk_premium": 0.045, "adverse_return_spread": 0.025, "min_hurdle": 0.07, "min_rate_over_terminal_growth": 0.02}
     chf = derived_rates({"rf": 0.005, "g": 0.01}, v)          # 5.0% -> lifted to the 7% minimum
     assert chf["hurdle"] == pytest.approx(0.07) and chf["min_hurdle_binds"]
-    assert chf["floor"] == pytest.approx(0.03)                 # max(0.5% + 2.5%, 1% + 2%)
+    assert chf["floor"] == pytest.approx(chf["hurdle"])  # common basis
     kzt = derived_rates({"rf": 0.14, "g": 0.06, "crp": 0.03}, v)
-    assert kzt["hurdle"] == pytest.approx(0.215) and kzt["floor"] == pytest.approx(0.195)
+    assert kzt["hurdle"] == pytest.approx(0.185) and kzt["floor"] == pytest.approx(0.185)  # currency preview excludes country exposure
     hi_g = derived_rates({"rf": 0.01, "g": 0.08}, v)           # terminal growth lifts both rates; floor never above hurdle
     assert hi_g["hurdle"] == pytest.approx(0.10) and hi_g["floor"] == pytest.approx(0.10)
 

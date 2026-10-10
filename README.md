@@ -29,7 +29,7 @@ On macOS or Linux use `python3.12 -m venv .venv`, `.venv/bin/python` and `cp`.
 
 Alternatively, run `run_weekly.bat`. It writes a log to `reports\logs\`.
 
-**Runtime:** about 2 seconds per symbol on a fresh fetch, so 131 names took 4 minutes and 500 names takes about 15–20 minutes. Re-runs within the cache window take seconds; only prices are refreshed.
+**Runtime:** fundamentals are cached; dated quotes and current share/capitalization metadata are refreshed per symbol on each run. Additional statement/analyst requests can take longer than earlier versions. A failed refresh is exposed, and stale data cannot silently become a candidate.
 
 **Output, in `reports/`:**
 - `screen_YYYY-MM-DD.xlsx` with these sheets:
@@ -52,50 +52,39 @@ A CSV copy of each run is kept in `data/history/`. Runs are never overwritten: a
 | Holdings | `input/holdings.csv` | Optional. Columns `isin,symbol,name,shares,value_eur,cost_eur`: current position value and the euro cost basis of the shares held. A holding attaches to the watchlist row with the same ISIN or symbol (else a unique name match) and is screened on its own if not on the watchlist. With `cost_eur`, holdings get a *score at your cost*: your average buy price against today's max entry price. Template: `examples/holdings.csv`. |
 | Symbol fixes | `overrides/symbols.csv` | Maps `source_key` (a watchlist symbol or an ISIN) to a Yahoo symbol, or to `SKIP`. Rows you would rather not share (for example ISINs of your own positions) go in `overrides/symbols.local.csv`, which is read too and git-ignored. Check the "Symbol check" sheet after adding names. |
 | Class fixes | `overrides/classification.csv` | Forces `operating`, `cyclical`, `financial`, `holdco` or `fund`. Personal rows can go in the git-ignored `overrides/classification.local.csv`. |
-| Parameters | `config.toml` | Equity risk premium, adverse-case settings, horizon and caps, and the **per-currency rates table** (10-year yield, terminal growth, country risk premium, `as_of` date). Update the table when rates move, by hand or in the dashboard's Method view (see `dashboard/README.md`). The run refuses to start if a reporting currency in the universe is missing from it or a rate is malformed. |
+| Parameters | `config.toml` | Purchase-policy parameters, the **currency rates table** (10-year yield, terminal growth, `as_of`), and separate **country-risk assumptions**. Update the table when rates move, by hand or in the dashboard's Method view (see `dashboard/README.md`). The run refuses to start if a reporting currency in the universe is missing from it or a rate is malformed. |
 
 `input/` is git-ignored: your watchlist and positions never leave your machine. The shared `overrides/` files are versioned.
 
 ## Method
 
-Metrics are computed per company in its reporting currency. Market cap is converted from the quote currency, and GBp/ADR quirks are handled. Each statement (income, cash flow, balance sheet) is used as one unit, so fields never mix a TTM and an annual period; "Data as of" is the oldest period used.
+Tripwire separates a **purchase-policy ceiling** from an independently supported intrinsic valuation. The automatic operating-company path is explicitly an **accounting proxy**, not a universal fair-value model. Every value shows its model, evidence basis, cash-flow claim and source dates.
 
-**One absolute score.** Every ranked name gets a **max entry price** and the **entry score** `100 × (1 − price / max entry price)`. +20 means the price is 20% below the ceiling, negative means above it. It is a signed price gap, not a return forecast. Status does not depend on which other names are in the run.
+**The data must reconcile.** Each statement uses one coherent period; financial companies use net income without requiring EBIT. Missing debt, equity or noncommon claims are not filled with zero. Quotes refresh capitalization and share metadata together. Unresolved currency units, ownership scope, stale observations and missing essentials prevent candidate status.
 
-**Base earnings.** Operating companies: NOPAT = EBIT × (1 − tax). Cyclicals: median EBIT margin over the annual years plus TTM, times TTM revenue (the adverse case uses the lower of TTM and 3-year average revenue). Financials: net income.
+**Growth must be funded.** Earnings-based projections validate every year's reinvestment and terminal funding. Falling earnings do not automatically release capital. Accounting ROIC includes acquisition capital; absent sourced alternatives, its terminal return fades to the lower of the current proxy and the policy hurdle. Base and operating-stress cases use the same rate. A stress that raises value is reported as a scenario crossing, not forced into a downside number.
 
-**Growth has to be funded.** Earnings grow at *g*, fading to the currency's terminal growth over 10 years. The owner only receives earnings × (1 − g / R), where R is the return on new capital (ROIC excluding goodwill for operating companies, ROE for financials; the lower of the current and the 3-year average, capped at 40%). Goodwill is excluded because an acquisition premium is sunk and does not fund organic growth; the reported ROIC is still shown for context. When R equals the discount rate, growth adds no value; the starting growth is also capped at R because a self-funded business cannot grow faster than it earns on reinvestment.
+**Business economics choose the model.** Source-labeled issuer inputs support operating revenue/margin forecasts (including funded recovery), bank and insurer capital distributions, REIT AFFO, regulated rate-base cash flows, attributable NAV and finite-life projects. Banks, property businesses, utilities and hybrids without their required inputs abstain. Short-window cyclical proxies are flagged. See [the complete contracts and limitations](docs/valuation-method.md) and [fictional input examples](examples/valuation.toml).
 
-**Two mechanical cases.** The reasonable case sets the max entry price; the adverse case is a separate downside check (the **adverse score**, same formula against the adverse value). Taking the lower of the two stacked every adverse assumption onto the timing signal: it set the ceiling for 62 of 104 names in the 2026-10-10 run and pushed names priced above their hurdle return to −100.
-1. **Reasonable:** g = mean of 3-year revenue CAGR (incl. TTM) and analyst next-year growth, clipped to −5%…30%. R held at today's level. Discounted at the **hurdle** = currency 10-year government yield + equity risk premium.
-2. **Adverse:** g = half the lowest growth input (a decline is kept as is); cyclicals never above terminal growth, and on the trough EBIT margin of the window. R fades linearly to the hurdle (excess returns competed away). Discounted at the **floor** = currency 10-year yield + 2.5 points (half the premium) + country risk premium: the return still required if the adverse case happens. Both rates are lifted to at least terminal growth + 2 points so the terminal value stays finite, and the hurdle is never below 7% nominal.
+**One absolute score:** `100 × (1 − market cap / positive policy equity ceiling)`, displayed with a −100 floor; the raw score is retained. Scores and eligibility do not depend on which other stocks are in the run. Peer percentiles remain context only.
 
-For operating companies the firm value is discounted at the equity hurdle (conservative for levered names) and net debt and minorities are deducted.
+**Geography is separate from currency.** Reporting currency sets nominal consistency. Sourced country exposures or an issuer premium override the labeled provider-country-risk policy. The optional FX-parity scenario is not an expected EUR return or an executed hedge.
 
-**Candidate** = entry score ≥ 0 and no critical data flag (stale statements, a yield above 25%, no market cap, a bank with equity below 4% of assets).
+**Inverse results expose ambiguity.** A unique implied growth/yield is shown only when solved and residual-checked. Multiple roots, weak identification, invalid inputs and absent solutions are distinct states. Firm implied yields are not labeled shareholder returns.
 
-**Financial sub-families** share the equation but differ in inputs: banks as above; insurers use the lower of TTM and 3-year average net income; fintech/marketplace platforms from the override file keep the ROE growth cap and carry a flag saying the score is a conservative floor, because their equity is cash-inflated.
+## Sources and reproducibility
 
-**Visibility:** the "Caps hit" column lists every parameter that bound a name (growth cap, growth ≤ R, R cap, R smoothed, minimum hurdle, invested capital ≤ 0). "Implied return, base ccy" converts the local implied return to EUR terms by the rate differential so names in different currencies can be compared on one number.
+- `overrides/valuation.toml` and optional git-ignored `valuation.local.toml` hold sourced issuer facts and base/stress assumptions. No example assumptions are loaded automatically.
+- yfinance supplies annual/trailing/quarterly statements, analyst ranges/counts, earnings estimates and revisions. Coverage varies; missing data is visible.
+- An explicit `sec_cik` plus `SEC_USER_AGENT` enables optional SEC companyfacts retrieval. This is a limited standard US-GAAP balance-fact mapper, not automatic global or regulatory-capital extraction. Configuration/access failures are visible.
+- Raw fetched fundamentals and optional filings are saved as immutable snapshots. Each run retains its configuration, code hashes, statement periods and quote/FX observations.
+- Experimental inference, cycle estimation and probabilistic ranking are kept outside production in [research/README.md](research/README.md).
 
-**Not rankable** (listed with the reason, never silently assumed): missing debt or cash figure, no positive book equity (financials), no return on capital, no positive base earnings, a ceiling at or below zero (net debt exceeds what the business earns on new capital), or a reporting currency absent from the rates table. Yahoo omits every debt row for debt-free issuers; those are treated as debt-free and flagged.
+## Known limits
 
-**Context, not gates:** implied return (the discount rate at which the funded reasonable path equals EV), implied growth (the starting growth the price needs at the hurdle), peer-group percentiles for value / quality / growth / balance, and EV/Sales vs own 5-year median.
+Automatic values still use accounting capital, a revenue-growth proxy, effective taxes and a simplified equity bridge. Maintenance investment, restricted cash, pensions, dilution, geographic operations, acquisition economics and marginal returns need issuer-specific evidence. Explicit sector models expose these requirements; they do not invent missing financial facts.
 
-**Special cases:**
-- **Fintech/marketplace hybrids** whose customer funds distort cash flow (Kaspi, MercadoLibre, Adyen, Wise, Euronext's clearing house) are treated as financials via `overrides/classification.csv`.
-- **Not scored:** loss-making companies (EBIT ≤ 0; financials: net income ≤ 0), holding companies (value via NAV), and funds. A profitable company with negative free cash flow is still ranked and flagged.
-
-## Known limitations
-
-- yfinance uses unofficial endpoints, which can break or rate-limit. Rate limits trigger a 30→240 s backoff, and the stale cache is used as a fallback.
-- The return on capital comes from book invested capital (average of the last two year-ends, ex goodwill). Buybacks, large cash piles and expensed intangibles distort it; names with negative invested capital get the return cap and a flag.
-- Many non-US issuers report no stock compensation; their FCF yield is flattered (flagged). NOPAT already expenses SBC, so the ceiling is unaffected.
-- One-offs in TTM data are not removed. Yields above 25% are flagged and excluded from candidates.
-- Historical multiples use today's FX rate.
-- Analyst growth is Yahoo's revenue estimate and may be missing or stale.
-- Neither this score nor its predecessor has been validated against future returns; that needs point-in-time history that free data does not provide.
-- Free API keys (Finnhub, Alpha Vantage) are not used yet. If added, read them from environment variables (e.g. `FINNHUB_API_KEY`), never from committed files.
+Neither these valuation assumptions nor candidate selection has been validated as predictive of future stock returns. Free timestamped filings can support limited point-in-time fundamental analysis, but complete historical global consensus, delisted stocks and contemporaneous universes remain separate data requirements. Numerical tests and a green regression snapshot do not establish investment performance.
 
 ## Tests
 
@@ -110,3 +99,11 @@ For operating companies the firm value is discounted at the equity hurdle (conse
 MIT, see [LICENSE](LICENSE). The bundled IBM Plex fonts (`dashboard/static/fonts/`) are under the SIL Open Font License, included alongside them.
 
 Tripwire is a screening aid, not investment advice. Yahoo Finance data is unofficial and can be wrong or incomplete; verify anything that matters against company filings.
+
+Offline real-record validation (no downloads or golden regeneration):
+
+```powershell
+.venv\Scripts\python tools/validate_corpus.py --valuation-date YYYY-MM-DD --cache-dir PATH_TO_SAVED_CACHE --fx-json PATH_TO_FROZEN_FX_JSON --output-dir data/validation/corpus
+```
+
+FX JSON maps `FROM/TO` to positive rates. Preserve source/as-of evidence in its optional `_provenance` object. Review intentional golden changes before regenerating only the active checkout's local snapshot.

@@ -34,7 +34,7 @@ TRACKED = ["price", "ceiling_px", "reasonable_px", "adverse_px", "entry_score", 
 
 
 def _clean(v):
-    """JSON-safe scalar: NaN -> None, ±inf -> "+inf"/"-inf" (an unbounded value is information), numpy -> python."""
+    """JSON-safe scalar: NaN -> None, Â±inf -> "+inf"/"-inf" (an unbounded value is information), numpy -> python."""
     if v is None:
         return None
     if hasattr(v, "item"):
@@ -130,13 +130,14 @@ class Store:
     def config_payload(self) -> dict:
         if not self.config_path.is_file():
             return {"available": False}
+        from screener.report import METHOD
         raw = self.config_path.read_bytes()
         cfg = tomllib.loads(raw.decode("utf-8"))
         v = cfg.get("valuation", {})
         today = date.today().isoformat()
         rates = [{"currency": ccy, **derived_rates(r, v), "as_of": r.get("as_of"), "age_days": configedit.age_days(r.get("as_of"), today)}
                  for ccy, r in sorted(cfg.get("rates", {}).items())]
-        return {"available": True, "valuation": v, "scoring": cfg.get("scoring", {}), "rates": rates,
+        return {"available": True, "method": METHOD, "valuation": v, "scoring": cfg.get("scoring", {}), "rates": rates,
                 "editable_keys": configedit.EDITABLE_VALUATION, "rate_ranges": configedit.RATE_RANGES,
                 "sha": hashlib.sha256(raw).hexdigest(),
                 "modified": datetime.fromtimestamp(self.config_path.stat().st_mtime).isoformat(timespec="minutes")}
@@ -175,21 +176,9 @@ class Store:
 
 # ---------- pure functions (unit-tested)
 def derived_rates(r: dict, v: dict) -> dict:
-    """Hurdle and adverse floor for one currency, mirroring screener.metrics: both include the country risk premium,
-    are lifted to terminal growth + min_rate_over_terminal_growth, the hurdle is at least min_hurdle and the floor never
-    exceeds the hurdle."""
-    rf, g, crp = r.get("rf"), r.get("g"), r.get("crp", 0.0)
-    erp = v.get("equity_risk_premium")
-    if rf is None or g is None or erp is None:
-        return {"rf": rf, "g": g, "crp": crp, "hurdle": None, "floor": None, "min_hurdle_binds": False}
-    least = g + v.get("min_rate_over_terminal_growth", 0.02)
-    hurdle = max(rf + erp + crp, least)
-    min_binds = hurdle < v.get("min_hurdle", 0.0)
-    if min_binds:
-        hurdle = v["min_hurdle"]
-    floor = min(max(rf + v.get("adverse_return_spread", 0.0) + crp, least), hurdle)
-    return {"rf": rf, "g": g, "crp": crp, "hurdle": hurdle, "floor": floor, "min_hurdle_binds": min_binds}
-
+    """Currency-only policy preview; issuer country exposure is added per company."""
+    from screener.checks import policy_rates
+    return policy_rates(r,v)
 
 
 def normalise(df: pd.DataFrame) -> pd.DataFrame:

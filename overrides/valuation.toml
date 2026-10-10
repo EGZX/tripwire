@@ -1,0 +1,4 @@
+# Source-backed issuer facts and valuation assumptions. Empty by design.
+# See examples/valuation.toml and docs/valuation-method.md.
+# Personal entries belong in valuation.local.toml (git-ignored).
+[issuers]

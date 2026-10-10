@@ -1,82 +1,237 @@
-"""Earnings-based distribution model.
+"""Annual nominal cash-flow valuation with explicit domains and inverse results.
 
-Earnings e_t grow at g_t (fading linearly from g0 to the terminal rate gT over `years`). Growth has to be
-funded: reinvestment during year t at a return on new capital R_t pays for next year's growth, so the
-business retains g_{t+1} / R_t of year-t earnings and the owner receives d_t = e_t * (1 - g_{t+1} / R_t).
-R fades linearly from R0 to RT. R0 = None means "no reinvestment needed" (plain extrapolation; diagnostics).
-
-After `years`, a Gordon terminal value on d_{N+1} at (r - gT). End-of-year discounting.
-Standard result (McKinsey value-driver formula): when R == r throughout, value = e_1 / r regardless of
-later growth, i.e. growth beyond year 1 is value-neutral. Year-1 growth was funded by past reinvestment the
-buyer never paid for, so it is not charged.
+Growth in t+1 is funded in t. Contraction does not imply liquidation at book
+value. The funded-growth model cannot silently assume external financing.
 """
 from __future__ import annotations
-
+from dataclasses import dataclass
 import math
-
+from numbers import Integral, Real
+import numpy as np
+from numpy.polynomial import Chebyshev
 from scipy.optimize import brentq
 
+# Numerical error budgets, not economic/materiality thresholds.
+RESIDUAL_RTOL = 1e-9
+ROOT_XTOL = 1e-12
+
+class InvalidModel(ValueError):
+    """Invalid assumptions or infeasible financing."""
+
+@dataclass(frozen=True)
+class Solution:
+    status: str
+    roots: tuple[float, ...] = ()
+    residuals: tuple[float, ...] = ()
+    reason: str = ""
+
+    @property
+    def value(self) -> float | None:
+        return self.roots[0] if self.status == "solved" else None
+
+def finite(*xs: float) -> None:
+    if any(isinstance(x, bool) or not isinstance(x, Real) or not math.isfinite(x) for x in xs):
+        raise InvalidModel("inputs must be finite real numbers")
+
+def horizon(years: int) -> None:
+    if isinstance(years, bool) or not isinstance(years, Integral) or years < 1:
+        raise InvalidModel("years must be a positive integer")
 
 def fade(a: float, b: float, years: int) -> list[float]:
-    """Linear path from a (year 1) to b (year `years`)."""
-    if years == 1:
-        return [a]
-    return [a + (b - a) * (t / (years - 1)) for t in range(years)]
-
+    finite(a, b)
+    horizon(years)
+    return [a] if years == 1 else [a + (b-a)*t/(years-1) for t in range(years)]
 
 def distributions(e0: float, g0: float, g_terminal: float, years: int,
                   R0: float | None = None, RT: float | None = None) -> tuple[list[float], float]:
-    """Owner distributions for years 1..N and the first terminal-year distribution d_{N+1}."""
-    gs = fade(g0, g_terminal, years) + [g_terminal]  # g_{N+1} = terminal growth
-    Rs = fade(R0, RT if RT is not None else R0, years) if R0 is not None else [None] * years
+    finite(e0, g0, g_terminal)
+    horizon(years)
+    if e0 < 0 or min(g0, g_terminal) <= -1:
+        raise InvalidModel("earnings must be nonnegative and growth greater than -100%")
+    if R0 is None and RT is not None:
+        raise InvalidModel("terminal return requires an initial return")
+    if R0 is not None:
+        finite(R0, R0 if RT is None else RT)
+        if min(R0, R0 if RT is None else RT) <= 0:
+            raise InvalidModel("return on new capital must be positive")
+    gs = fade(g0, g_terminal, years) + [g_terminal]
+    Rs = fade(R0, R0 if RT is None else RT, years) if R0 is not None else [None]*years
     e, out = e0, []
     for t, R in enumerate(Rs):
         e *= 1 + gs[t]
-        g_next = gs[t + 1]
-        out.append(e * (1 - g_next / R) if R else e)
-    R_term = Rs[-1]
-    d_term = e * (1 + g_terminal) * ((1 - g_terminal / R_term) if R_term else 1.0)
+        retention = max(gs[t+1], 0.0)/R if R is not None else 0.0
+        if retention > 1 + 16*np.finfo(float).eps:
+            raise InvalidModel(f"growth exceeds return on capital in year {t+1}: external funding required")
+        out.append(e*(1-min(retention, 1.0)))
+    terminal_R = RT if RT is not None else R0
+    terminal_retention = max(g_terminal, 0.0)/terminal_R if terminal_R is not None else 0.0
+    if terminal_retention > 1 + 16*np.finfo(float).eps:
+        raise InvalidModel("terminal growth exceeds return on capital")
+    d_term = e*(1+g_terminal)*(1-min(terminal_retention, 1.0))
+    finite(*out, d_term)
     return out, d_term
 
+def discount(cashflows: list[float], terminal_cashflow: float, rate: float, terminal_growth: float) -> float:
+    """PV of explicit firm OR equity cash flows; caller owns claim matching."""
+    finite(*cashflows, terminal_cashflow, rate, terminal_growth)
+    if not cashflows or rate <= -1 or terminal_growth <= -1 or (terminal_cashflow != 0 and rate <= terminal_growth):
+        raise InvalidModel("discount rate must exceed terminal growth and -100%; path must be nonempty")
+    value = math.fsum(cf/(1+rate)**t for t, cf in enumerate(cashflows, 1))
+    if terminal_cashflow != 0:
+        value += terminal_cashflow/(rate-terminal_growth)/(1+rate)**len(cashflows)
+    finite(value)
+    return value
 
 def present_value(e0: float, g0: float, r: float, g_terminal: float, years: int,
                   R0: float | None = None, RT: float | None = None) -> float:
-    if r <= g_terminal:
-        return math.inf
-    ds, d_term = distributions(e0, g0, g_terminal, years, R0, RT)
-    pv = sum(d / (1 + r) ** t for t, d in enumerate(ds, start=1))
-    return pv + d_term / (r - g_terminal) / (1 + r) ** years
+    ds, terminal = distributions(e0, g0, g_terminal, years, R0, RT)
+    return discount(ds, terminal, r, g_terminal)
 
-
-def _root(f, lo: float, hi: float) -> float | None:
-    """Bracketed root or None. Never returns a bracket endpoint as if it were a solution."""
+def solve_return(e0: float, price: float, g0: float, g_terminal: float, years: int,
+                 R0: float | None = None, RT: float | None = None) -> Solution:
     try:
-        flo, fhi = f(lo), f(hi)
-        if not (math.isfinite(flo) and math.isfinite(fhi)) or flo * fhi > 0:
-            return None
-        return brentq(f, lo, hi)
-    except (ValueError, OverflowError, ZeroDivisionError):
-        return None
+        finite(e0, price, g0, g_terminal)
+        if price <= 0 or e0 <= 0:
+            raise InvalidModel("positive price and earnings required")
+        ds, terminal = distributions(e0, g0, g_terminal, years, R0, RT)
+        if not any(x > 0 for x in [*ds, terminal]):
+            return Solution("no_solution", reason="no positive distributions")
+        f = lambda r: discount([d/price for d in ds], terminal/price, r, g_terminal)-1
+        # Nonnegative cash flows make PV strictly decreasing: at most one root.
+        lo, hi = (g_terminal + max(1e-12, abs(g_terminal)*1e-12) if terminal else 0.0), 3.0
+        if terminal==0:
+            while f(lo)<0:
+                next_lo=(lo-1)/2
+                if next_lo==lo:return Solution("unresolved",reason="finite-payout return approaches -100% beyond floating-point resolution")
+                lo=next_lo
+        if lo >= hi or f(lo)*f(hi) > 0:
+            return Solution("outside_domain", reason="no return in the admissible discount domain up to 300%")
+        root = brentq(f, lo, hi, xtol=ROOT_XTOL)
+        residual = f(root)*price
+        if abs(residual/price) > RESIDUAL_RTOL:
+            return Solution("unresolved", reason="return residual exceeds numerical tolerance")
+        return Solution("solved", (root,), (residual,))
+    except (ValueError, OverflowError, ZeroDivisionError) as exc:
+        return Solution("invalid", reason=str(exc))
 
+def _poly_roots(poly: Chebyshev) -> list[float]:
+    """All roots on [-1,1], partitioned by derivative roots, including tangencies.
 
-def implied_return(e0: float, price: float, g0: float, g_terminal: float, years: int,
-                   R0: float | None = None, RT: float | None = None) -> float | None:
-    """Discount rate at which the distribution path is worth `price` (None if e0 <= 0 or no root in (gT, 300%])."""
-    if not (e0 and e0 > 0 and price and price > 0):
-        return None
-    return _root(lambda r: present_value(e0, g0, r, g_terminal, years, R0, RT) - price, g_terminal + 1e-4, 3.0)
+    Each partition is monotone. Scaling and the Chebyshev basis avoid a fixed
+    grid that could miss close roots. Original PV residuals are checked later.
+    """
+    scale = float(np.max(np.abs(poly.coef)))
+    poly = poly.trim(tol=32*np.finfo(float).eps*scale)
+    if poly.degree() == 0:
+        return []
+    points = [-1.0, *_poly_roots(poly.deriv()), 1.0]
+    roots = [x for x in points if abs(poly(x)) <= 64*np.finfo(float).eps*scale*len(poly.coef)]
+    for a, b in zip(points, points[1:]):
+        if poly(a)*poly(b) < 0:
+            roots.append(brentq(poly, a, b, xtol=ROOT_XTOL))
+    out = []
+    for x in sorted(roots):
+        if not out or abs(x-out[-1]) > 100*ROOT_XTOL:
+            out.append(x)
+    return out
 
+def _monotone_growth(f,lo,hi,price):
+    if f(lo)*f(hi)>0:
+        return Solution("no_solution",reason="no solution in the documented admissible growth search domain")
+    root=brentq(f,lo,hi,xtol=ROOT_XTOL)
+    residual=f(root)*price
+    if abs(residual/price)>RESIDUAL_RTOL:
+        return Solution("unresolved",reason="growth residual exceeds numerical tolerance")
+    return Solution("solved",(root,),(residual,))
 
-def implied_growth(e0: float, price: float, r: float, g_terminal: float, years: int,
-                   R0: float | None = None, RT: float | None = None) -> float | None:
-    """Starting growth (fading to terminal) that justifies `price` at rate r. With reinvestment the search is
-    limited to growth the business can fund (g <= R0). None if nothing in the bracket matches."""
-    if not (e0 and e0 > 0 and price and price > 0) or r <= g_terminal:
-        return None
-    hi = min(3.0, R0) if R0 is not None else 3.0
-    return _root(lambda g: present_value(e0, g, r, g_terminal, years, R0, RT) - price, -0.9, hi)
+def solve_growth(e0: float, price: float, r: float, g_terminal: float, years: int,
+                 R0: float | None = None, RT: float | None = None) -> Solution:
+    """All admissible starting-growth roots; do not conflate ambiguity and absence.
 
+    PV is piecewise polynomial in g0, with breaks when growth investment is zero.
+    Each polynomial is isolated using its derivative, not an arbitrary grid.
+    """
+    try:
+        finite(e0, price, r, g_terminal)
+        horizon(years)
+        terminal_R=RT if RT is not None else R0
+        zero_terminal=(terminal_R is not None and g_terminal>=0 and g_terminal==terminal_R)
+        if e0 <= 0 or price <= 0 or (r <= g_terminal and not zero_terminal) or r <= -1 or g_terminal <= -1:
+            raise InvalidModel("positive earnings/price and rate above terminal growth required")
+        if years > 50:
+            return Solution("unsupported", reason="growth inversion supports at most 50 annual periods")
+        Rs = fade(R0, R0 if RT is None else RT, years) if R0 is not None else [None]*years
+        if R0 is None and RT is not None:
+            raise InvalidModel("terminal return requires initial return")
+        if R0 is None:
+            # Positive distributions without reinvestment are strictly increasing
+            # in initial growth. Direct bracketing avoids unnecessary high-degree
+            # polynomial conditioning over a broad growth interval.
+            f=lambda g:present_value(e0/price,g,r,g_terminal,years)-1
+            return _monotone_growth(f,-.9,3.0,price)
+        if R0 is not None and min(Rs + ([RT] if RT is not None else [])) <= 0:
+            raise InvalidModel("return on capital must be positive")
+        if R0 is not None and g_terminal > (RT if RT is not None else R0):
+            raise InvalidModel("terminal growth exceeds return on capital")
+        lo, hi = -0.9, 3.0  # year-1 growth uses opening capital; subsequent funding bounds below
+        a = fade(1.0, 0.0, years) + [0.0]
+        b = fade(0.0, g_terminal, years) + [g_terminal]
+        cuts = []
+        for t, R in enumerate(Rs):
+            if R is not None:
+                if a[t+1] == 0 and b[t+1] > R:
+                    raise InvalidModel("terminal growth exceeds return on capital")
+                if a[t+1] > 0:
+                    hi = min(hi, (R-b[t+1])/a[t+1])
+            if a[t+1] > 0:
+                cuts.append(-b[t+1]/a[t+1])
+        if hi <= lo:
+            return Solution("outside_domain", reason="empty funded growth domain")
+        if 0<=g_terminal<r and min([*Rs,terminal_R])>=r:
+            # Every funded positive-growth investment earns at least its cost;
+            # after growth turns positive it stays nonnegative. Higher initial
+            # growth then increases value (including the opening earnings base).
+            f=lambda g:present_value(e0/price,g,r,g_terminal,years,R0,RT)-1
+            return _monotone_growth(f,lo,hi,price)
+        edges = [lo, *sorted(set(x for x in cuts if lo < x < hi)), hi]
+        roots = []
+        for left, right in zip(edges, edges[1:]):
+            mid, half = (left+right)/2, (right-left)/2
+            variable = Chebyshev([mid, half])
+            e, pv = Chebyshev([e0]), Chebyshev([0.0])
+            for t, R in enumerate(Rs):
+                e = e*(1+a[t]*variable+b[t])
+                next_g = a[t+1]*variable+b[t+1]
+                retention = next_g/R if R is not None and next_g(0) > 0 else Chebyshev([0.0])
+                pv += e*(1-retention)/(1+r)**(t+1)
+            terminal_R = RT if RT is not None else R0
+            retention = max(g_terminal, 0)/terminal_R if terminal_R is not None else 0
+            if retention!=1:
+                pv += e*(1+g_terminal)*(1-retention)/(r-g_terminal)/(1+r)**years
+            objective = (pv-price)/price
+            if np.max(np.abs(objective.coef)) <= RESIDUAL_RTOL:
+                return Solution("indeterminate", reason="price does not identify growth on a whole interval")
+            for critical in _poly_roots(objective.deriv()):
+                if abs(objective(critical)) <= RESIDUAL_RTOL:
+                    return Solution("weakly_identified", reason="price is within numerical resolution of a turning point")
+            roots.extend(mid+half*x for x in _poly_roots(objective))
+        unique, residuals = [], []
+        for g in sorted(roots):
+            residual = present_value(e0,g,r,g_terminal,years,R0,RT)-price
+            if abs(residual) > RESIDUAL_RTOL*price:
+                return Solution("unresolved", reason="growth residual exceeds numerical tolerance")
+            if not unique or abs(g-unique[-1]) > 100*ROOT_XTOL:
+                unique.append(g); residuals.append(residual)
+        status = "no_solution" if not unique else "solved" if len(unique)==1 else "nonunique"
+        return Solution(status, tuple(unique), tuple(residuals))
+    except (ValueError, OverflowError, ZeroDivisionError) as exc:
+        return Solution("invalid", reason=str(exc))
 
-# backwards-compatible names
+def implied_return(*args, **kwargs) -> float | None:
+    return solve_return(*args, **kwargs).value
+
+def implied_growth(*args, **kwargs) -> float | None:
+    return solve_growth(*args, **kwargs).value
+
 growth_path = fade
 implied_irr = implied_return

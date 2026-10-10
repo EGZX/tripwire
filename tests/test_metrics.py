@@ -1,5 +1,6 @@
 """Entry-ceiling model on synthetic Yahoo-shaped data: scenarios, essentials, period alignment."""
 import math
+from datetime import date
 
 import pandas as pd
 import pytest
@@ -40,7 +41,7 @@ def operating(**over) -> dict:
     cf = {"Operating Cash Flow": [220, 200, 180, 165], "Capital Expenditure": [-40, -36, -33, -30],
           "Stock Based Compensation": [10, 9, 8, 7], "Reconciled Depreciation": [30, 27, 25, 22]}
     bal = {"Total Debt": [100, 100, 100, 100], "Cash Cash Equivalents And Short Term Investments": [50, 45, 40, 35],
-           "Stockholders Equity": [600, 500, 400, 300], "Total Assets": [900, 800, 700, 600], "Minority Interest": [0, 0, 0, 0]}
+           "Stockholders Equity": [600, 500, 400, 300], "Total Assets": [900, 800, 700, 600], "Minority Interest": [0, 0, 0, 0], "Preferred Stock Equity": [0, 0, 0, 0]}
     d = {"symbol": "TEST",
          "info": {"longName": "Test Co", "sector": "Technology", "industry": "Software - Application", "currency": "USD",
                   "financialCurrency": "USD", "regularMarketPrice": 20.0, "marketCap": 2000.0, "sharesOutstanding": 100,
@@ -55,7 +56,7 @@ def operating(**over) -> dict:
 
 
 def run(data, cfg=CFG, price=20.0, override=None):
-    return metrics.compute(data, price, FX(), cfg, override)
+    return metrics.compute(data, price, FX(), cfg, override,valuation_date=date(2026,10,10))
 
 
 def test_operating_entry_ceiling_is_the_reasonable_value_and_adverse_is_scored_separately():
@@ -63,15 +64,15 @@ def test_operating_entry_ceiling_is_the_reasonable_value_and_adverse_is_scored_s
     assert m["not_rankable"] == ""
     nopat = 210 * (1 - 0.20)                      # TTM EBIT x (1 - tax)
     assert m["base_earnings"] == pytest.approx(nopat)
-    hurdle, floor, gT = 0.095, 0.05, 0.03
+    hurdle, floor, gT = 0.095, 0.095, 0.03
     assert m["hurdle"] == pytest.approx(hurdle) and m["floor_rate"] == pytest.approx(floor)
     R = m["return_on_capital"]
     assert 0 < R <= 0.60
     g0, g_adv = m["est_growth"], m["adverse_growth"]
     assert g_adv == pytest.approx(0.5 * min(g0, m["rev_cagr_3y"], m["analyst_growth"]))
     net_debt = 50
-    reasonable = V.present_value(nopat, g0, hurdle, gT, 10, R, R) - net_debt
-    adverse = V.present_value(nopat, g_adv, floor, gT, 10, R, hurdle) - net_debt
+    reasonable = V.present_value(nopat, g0, hurdle, gT, 10, R, min(R,hurdle)) - net_debt
+    adverse = V.present_value(nopat, g_adv, floor, gT, 10, R, min(R,hurdle)) - net_debt
     assert m["value_reasonable"] == pytest.approx(reasonable)
     assert m["value_adverse"] == pytest.approx(adverse)
     ceiling = reasonable
@@ -81,7 +82,7 @@ def test_operating_entry_ceiling_is_the_reasonable_value_and_adverse_is_scored_s
     assert m["entry_score"] == pytest.approx(100 * (1 - 2000 / ceiling))
     assert m["ceiling_px"] == pytest.approx(20.0 * ceiling / 2000)
     # implied return solves the same funded path against EV
-    assert V.present_value(nopat, g0, m["implied_return"], gT, 10, R, R) == pytest.approx(2050, rel=1e-6)
+    assert V.present_value(nopat, g0, m["implied_return"], gT, 10, R, min(R,hurdle)) == pytest.approx(2050, rel=1e-6)
 
 
 def test_entry_score_example_from_design():
@@ -91,14 +92,14 @@ def test_entry_score_example_from_design():
     assert math.isnan(metrics.entry_score(60, 0))
 
 
-def test_no_debt_rows_at_all_means_debt_free_and_is_flagged():
-    # Yahoo omits every debt row for debt-free issuers (ISRG, ANET, Keyence): treat as zero, say so
+def test_absent_debt_is_unknown_not_assumed_zero():
+    # Missing rows do not prove zero; require a reconciled source.
     d = operating()
     for key in ("balance_sheet", "quarterly_balance_sheet"):
         d[key] = d[key].drop(index="Total Debt")
     m = run(d)
-    assert m["not_rankable"] == "" and "assumed debt-free" in m["flags"]
-    assert m["net_debt_fc"] == pytest.approx(-50)
+    assert "no debt figure" in m["not_rankable"]
+    assert math.isnan(m["net_debt_fc"])
 
 
 def test_debt_rows_present_but_total_missing_blocks_ranking():
@@ -117,22 +118,25 @@ def test_missing_balance_sheet_blocks_ranking():
     assert "debt" in m["not_rankable"] and "cash" in m["not_rankable"]
 
 
-def test_return_on_new_capital_excludes_goodwill():
+def test_goodwill_is_not_silently_removed_from_incremental_return_proxy():
     d = operating()
     for key in ("balance_sheet", "quarterly_balance_sheet"):
         d[key].loc["Goodwill"] = [300.0] * len(d[key].columns)
     m = run(d)
     nopat = 210 * 0.8
-    invested_avg = ((600 + 100 - 50) + (500 + 100 - 45)) / 2
+    invested_avg = 600 + 100 - 50  # no matching June opening balance: explicitly a closing-capital proxy
     assert m["roic"] == pytest.approx(nopat / invested_avg)                    # reported, incl. goodwill
-    assert m["return_on_capital"] == pytest.approx(nopat / (invested_avg - 300))   # marginal, ex goodwill
+    assert m["roic_ex_goodwill"] == pytest.approx(nopat / (invested_avg - 300))
+    assert m["return_on_capital"] == pytest.approx(nopat / invested_avg)
+    assert "proxy" in m["flags"]
 
 
 def test_non_positive_ceiling_is_not_rankable_with_reason():
     d = operating()
     for key in ("balance_sheet", "quarterly_balance_sheet"):
         d[key].loc["Total Debt"] = [50000.0] * len(d[key].columns)   # debt far above any business value
-    m = run(d)
+    cfg = {**CFG,"rates":{**CFG["rates"],"USD":{**CFG["rates"]["USD"],"g":0.0}}}
+    m = run(d,cfg)
     assert "ceiling" in m["not_rankable"]
     assert math.isnan(m.get("entry_score", math.nan))
 
@@ -146,7 +150,7 @@ def test_rates_stay_above_terminal_growth_by_the_configured_margin():
     d["info"]["financialCurrency"] = "CHF"
     m = run(d)
     assert m["hurdle"] == pytest.approx(0.05)          # 0.005 + 0.045
-    assert m["floor_rate"] == pytest.approx(0.03)      # 0.005 + 0.0 lifted to g + 0.02
+    assert m["floor_rate"] == pytest.approx(m["hurdle"])  # same discount basis
     assert math.isfinite(m["value_adverse"])
 
 
@@ -181,8 +185,8 @@ def test_financial_uses_net_income_roe_and_market_cap():
     ni = 152 * 1.05
     assert m["base_earnings"] == pytest.approx(ni)
     assert m["return_on_capital"] == pytest.approx(ni / 600)
-    assert m["value_reasonable"] == pytest.approx(
-        V.present_value(ni, m["est_growth"], 0.095, 0.03, 10, m["return_on_capital"], m["return_on_capital"]))
+    assert "requires explicit sector inputs" in m["not_rankable"]
+    assert "entry_score" not in m
 
 
 def test_cash_flow_items_come_from_one_statement():
@@ -226,7 +230,7 @@ def test_cyclical_adverse_case_uses_trough_margin_and_trend_growth():
     import numpy as np
     m = run(cyclical(), cfg_with(cyclical_adverse_margin="min", cyclical_adverse_growth_at_terminal=True))
     assert m["class"] == "cyclical"
-    margins = [200 / 1000, 182 / 909, 165 / 826, 150 / 751, 150 / 1050]
+    margins = [200 / 1000, 182 / 909, 165 / 826, 150 / 751]  # overlapping TTM is not an independent year
     assert m["base_earnings"] == pytest.approx(float(np.median(margins)) * 1050 * 0.8)
     rev_adverse = min(1050, (826 + 909 + 1000 + 1050) / 4)
     assert m["base_earnings_adverse"] == pytest.approx(min(margins) * rev_adverse * 0.8)
@@ -237,7 +241,7 @@ def test_return_on_capital_uses_lower_of_current_and_three_year_average():
     m0 = run(operating())
     m = run(operating(), cfg_with(return_smoothing=True))
     tax = 0.2
-    annual = [(200 * (1 - tax)) / (600 + 100 - 50), (182 * (1 - tax)) / (500 + 100 - 45), (165 * (1 - tax)) / (400 + 100 - 40)]
+    annual = [(200 * (1-tax))/((650+555)/2), (182 * (1-tax))/((555+460)/2), (165 * (1-tax))/((460+365)/2)]
     avg3 = sum(annual) / 3
     assert m["return_on_capital"] == pytest.approx(min(m0["return_on_capital"], avg3))
     assert m["return_on_capital"] <= m0["return_on_capital"]
@@ -260,9 +264,10 @@ def test_thin_bank_capital_is_flagged():
     assert m["fin_type"] == "bank" and "thin capital" in m["flags"]
 
 
-def test_platform_override_is_flagged_as_conservative():
+def test_platform_override_requires_segment_evidence():
     m = run(operating(), override="financial")
-    assert m["fin_type"] == "platform" and "platform" in m["flags"]
+    assert m["fin_type"] == "platform" and "hybrid" in m["not_rankable"]
+    assert "not a conservative" in m["flags"]
 
 
 def test_minimum_hurdle_applies_after_currency_lookup():
@@ -276,14 +281,17 @@ def test_minimum_hurdle_applies_after_currency_lookup():
 def test_country_risk_premium_raises_both_rates():
     d = operating()
     d["info"]["financialCurrency"] = "KZT"
-    m = run(d)
+    d["info"]["country"]="Kazakhstan"
+    cfg={**CFG,"country_risk":{"Kazakhstan":{"premium":0.03,"source":"test policy"}}}
+    m = run(d,cfg)
     assert m["hurdle"] == pytest.approx(0.14 + 0.045 + 0.03)
-    assert m["floor_rate"] == pytest.approx(0.14 + 0.0 + 0.03)
+    assert m["floor_rate"] == pytest.approx(m["hurdle"])
 
 
-def test_implied_return_in_base_currency_terms():
+def test_fx_parity_scenario_is_named_separately_from_expected_return():
     m = run(operating())
-    assert m["implied_return_base"] == pytest.approx(m["implied_return"] - (0.05 - 0.03))
+    assert "implied_return_base" not in m
+    assert m["fx_parity_return"] == pytest.approx((1+m["implied_return"])*1.03/1.05-1)
 
 
 def test_caps_hit_lists_binding_parameters():

@@ -66,3 +66,7 @@ Clicking any name opens the inspector. It shows the price against the reasonable
 ```powershell
 .venv\Scripts\python -m pytest -q tests/test_dashboard.py
 ```
+
+## Valuation evidence
+
+The inspector exposes the model, evidence basis, firm/equity yield claim, implied-growth solution status/roots and quote date. The Method view uses the same definitions as the generated report. Currency-rate previews exclude issuer country exposure, and operating stress uses the base discount rate. Sector assumptions are edited in `overrides/valuation.toml` (or its local copy), with the contracts in `docs/valuation-method.md`. The FX-parity display is a scenario, not an expected EUR equity return. Older saved runs retain their original outcomes and should not be interpreted as results of the revised model.

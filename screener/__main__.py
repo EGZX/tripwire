@@ -7,11 +7,12 @@ import csv
 import sys
 import time
 import tomllib
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
 
-from . import fetch, metrics, report, resolve, universe
+from . import fetch, metrics, report, resolve, universe, inputs, filings
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -44,6 +45,11 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = load_config(Path(args.config))
     ic, fc = cfg["inputs"], cfg["fetch"]
+    try:
+        cfg["issuer_inputs"]=inputs.load(ROOT/ic.get("valuation_overrides","overrides/valuation.toml"))
+    except ValueError as exc:
+        print(f"ISSUER INPUT ERROR: {exc}",flush=True)
+        return 2
     data_dir = ROOT / "data"
     t0 = time.time()
     log = lambda msg: print(msg, flush=True)
@@ -77,6 +83,9 @@ def main(argv: list[str] | None = None) -> int:
         d, fresh = fetch.get(e.yahoo, cache_dir, fc["fundamentals_max_age_days"], fc["max_retries"],
                              force=args.refresh, log=log)
         if d is not None:
+            issuer=cfg["issuer_inputs"].get(e.yahoo,{})
+            if issuer.get("sec_cik"):
+                d=filings.enrich(d,str(issuer["sec_cik"]),cache_dir)
             raw[e.yahoo] = d
         if fresh:
             elapsed = time.time() - t0
@@ -91,8 +100,9 @@ def main(argv: list[str] | None = None) -> int:
             log(f"CONFIG ERROR: {p}")
         log("Fix config.toml and rerun; nothing was written.")
         return 2
-    log("Refreshing prices (batched)...")
+    log("Refreshing dated quotes and share/market-cap metadata...")
     prices = fetch.latest_prices(list(raw))
+    valuation_date=date.today()  # one calendar date for every result and its report
     fx = fetch.FX()
     class_ov = load_class_overrides(ROOT / ic["classification_overrides"])
 
@@ -106,8 +116,10 @@ def main(argv: list[str] | None = None) -> int:
         if d is None:
             rows.append({**base, "class": "error", "flags": "fetch failed"})
             continue
+        if e.yahoo not in prices:
+            d={**d,"quote_refresh_failed":True}
         try:
-            m = metrics.compute(d, prices.get(e.yahoo), fx, cfg, class_ov.get(e.yahoo))
+            m = metrics.compute(d, prices.get(e.yahoo), fx, cfg, class_ov.get(e.yahoo),valuation_date=valuation_date)
         except Exception as exc:  # keep the run going; surface the problem in the report
             m = {"class": "error", "flags": f"metrics failed: {type(exc).__name__}: {exc}"}
         if e.owned and m.get("class") != "error":
@@ -132,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
                              for s, yn in zip(res["yahoo"], res["yahoo_name"])]
         res["similarity"] = [resolve.similarity(a, b) for a, b in zip(res["name"], res["yahoo_name"])]
 
-    xlsx, md = report.write(df, res, ROOT / "reports", data_dir / "history", cfg)
+    xlsx, md = report.write(df, res, ROOT / "reports", data_dir / "history", cfg,run_date=valuation_date)
     log(f"Done in {(time.time() - t0) / 60:.1f} min -> {xlsx}")
     log(f"Summary -> {md}")
     return 0

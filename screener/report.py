@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import glob
 import math
+import json
+import hashlib
 from datetime import date
 from pathlib import Path
 
@@ -17,10 +19,10 @@ COLUMNS = {  # column -> (header, number format)
     "symbol": ("Symbol", None), "name": ("Name", None), "owned": ("Owned", None),
     "position_eur": ("Position €", "#,##0"), "cost_px": ("Your avg cost", PX), "cost_score": ("Score at your cost", "0"), "class": ("Class", None), "status": ("Status", None),
     "candidate": ("Candidate", None), "entry_score": ("Entry score", "0"), "price": ("Price", PX),
-    "quote_ccy": ("Ccy", None), "ceiling_px": ("Max entry price", PX), "reasonable_px": ("Reasonable value", PX),
-    "adverse_px": ("Adverse value", PX), "adverse_score": ("Adverse score", "0"),
-    "implied_return": ("Implied return", PCT), "implied_return_base": ("Implied return, base ccy", PCT),
-    "hurdle": ("Hurdle", PCT), "floor_rate": ("Adverse floor", PCT), "caps_hit": ("Caps hit", None), "fin_type": ("Fin. type", None),
+    "quote_ccy": ("Ccy", None), "ceiling_px": ("Policy max entry", PX), "reasonable_px": ("Modeled base value", PX),
+    "adverse_px": ("Operating stress value", PX), "adverse_score": ("Stress score", "0"),
+    "implied_return": ("Implied cash-flow yield", PCT), "fx_parity_return": ("FX-parity scenario", PCT),
+    "hurdle": ("Hurdle", PCT), "floor_rate": ("Stress rate", PCT), "caps_hit": ("Caps hit", None), "fin_type": ("Fin. type", None),
     "implied_growth": ("Implied growth", PCT), "est_growth": ("Est. growth", PCT), "adverse_growth": ("Adverse growth", PCT),
     "terminal_growth": ("Terminal growth", PCT), "return_on_capital": ("Return on capital", PCT),
     "reinvest_rate": ("Reinvestment rate", PCT), "nopat_yield": ("NOPAT / EV", PCT), "fcf_yield": ("FCF-SBC / EV", PCT),
@@ -37,9 +39,18 @@ COLUMNS = {  # column -> (header, number format)
     "lists": ("Lists", None), "flags": ("Data flags", None), "not_rankable": ("Not rankable: reason", None),
 }
 DECISION = ["symbol", "name", "owned", "position_eur", "cost_px", "cost_score", "class", "status", "entry_score", "price", "quote_ccy",
-            "ceiling_px", "adverse_px", "adverse_score", "implied_return", "implied_return_base", "hurdle",
+            "ceiling_px", "adverse_px", "adverse_score", "implied_return", "fx_parity_return", "hurdle",
             "floor_rate", "implied_growth", "est_growth", "adverse_growth", "terminal_growth", "return_on_capital",
             "reinvest_rate", "caps_hit"]
+COLUMNS.update({"decision_rate":("Required rate",PCT),"discount_rate":("Valuation rate",PCT),"model_label":("Model",None),"model_family":("Business family",None),"model_quality":("Model evidence",None),
+    "valuation_basis":("Valuation basis",None),"implied_return_claim":("Yield claim",None),
+    "implied_growth_status":("Growth solution status",None),"implied_growth_roots":("Growth solutions",None),
+    "terminal_value_fraction":("Terminal PV share",PCT),"price_as_of":("Quote as of",None),
+    "country_risk_basis":("Country-risk basis",None),"statement_periods":("Statement provenance",None),
+    "assumptions_source":("Issuer assumptions source",None),"reinvestment_gap":("Investment reconciliation gap",PX)})
+DECISION += ["decision_rate","discount_rate","model_label","model_family","model_quality","valuation_basis","implied_return_claim","implied_growth_status",
+             "implied_growth_roots","terminal_value_fraction","price_as_of","country_risk_basis","assumptions_source","reinvestment_gap"]
+
 TAIL = ["composite", "score_value", "score_quality", "score_growth", "score_balance", "mcap_eur_bn", "currency",
         "sector", "industry", "data_as_of", "lists", "flags", "not_rankable"]
 OPERATING_COLS = DECISION + ["nopat_yield", "fcf_yield", "ebit_yield", "evs_vs_hist", "roic", "roic_ex_goodwill", "gross_profitability",
@@ -56,22 +67,21 @@ OTHER_COLS = ["symbol", "name", "owned", "position_eur", "class", "earnings_yiel
               "lists", "flags"]
 
 METHOD = [
-    ("Purpose", "Triage: decides which companies deserve a full valuation. It is not a buy list."),
-    ("Data", "Yahoo Finance via yfinance (unofficial; may change or break). TTM statements where available, else last fiscal year (flagged). Fields within a statement always come from the same period; 'Data as of' is the oldest period used."),
-    ("Base earnings", "Operating cos: NOPAT = EBIT × (1 − tax). Cyclicals: median EBIT margin (annual years + TTM) × TTM revenue; the adverse case uses the lower of TTM and 3-year average revenue. Financials: net income."),
-    ("Funded growth", "Earnings grow at g, fading to the currency's terminal growth over the horizon. Growth must be paid for: the owner receives earnings × (1 − g / R), R = return on new capital (ROIC for operating cos, ROE for financials, capped). When R equals the discount rate, growth adds nothing."),
-    ("Reasonable case", "g = mean of 3y revenue CAGR and analyst next-FY growth (clipped, and capped at R). R = current ROIC/ROE throughout. Discounted at the hurdle = currency 10y government yield + equity risk premium."),
-    ("Adverse case", "Lower growth (see adverse growth mode). R fades from today's level to the hurdle (excess returns competed away); cyclicals on the trough margin. Discounted at the floor = currency 10y government yield + spread. A downside check reported as its own score, not mixed into the max entry price."),
-    ("Max entry price", "The reasonable-case equity value (operating cos: firm value − net debt − minorities), per share in the quote currency."),
-    ("Entry score", "100 × (1 − price / max entry price), floored at −100. +20 = price is 20% below the ceiling; negative = above it. A signed price gap, not a return forecast or a probability."),
-    ("Adverse score", "The same formula against the adverse-case value: how far the price is from what the business is worth if the adverse case happens. Context, not a gate."),
-    ("Status", "eligible (score ≥ 0, no critical data flag) · price above ceiling · data flag (stale statements, yield > 25%) · not rankable (missing essential input, with the reason) · not screened (loss-making, holdco, fund)."),
-    ("Implied return / growth", "Implied return: the discount rate at which the reasonable-case funded path equals EV (market cap for financials). Implied growth: the starting growth the price needs at the hurdle, with the same reinvestment."),
-    ("Context columns", "Peer percentiles (value / quality / growth / balance) within operating+cyclical or financials, and EV/Sales vs own 5-year median. Descriptive only: they are not gates and change when the watchlist changes."),
-    ("Not scored", "Loss-making (EBIT ≤ 0; financials: net income ≤ 0), holding companies (value via NAV), funds/ETFs. Classification overrides: overrides/classification.csv."),
-    ("Return on new capital", "Operating cos: NOPAT / (equity + debt − cash − goodwill), averaged over the last two year-ends; goodwill is a sunk acquisition premium that does not fund organic growth. 'ROIC' (incl. goodwill) is shown for context. Issuers with no debt rows at all are treated as debt-free (flagged)."),
-    ("Known blind spots", "Firm cash flows are discounted at an equity rate (conservative for levered names). Book invested capital drives the return on capital; buybacks and cash piles inflate it (capped). One-offs in TTM data are not removed. Historical multiples use today's FX. Rates table in config.toml must be kept current."),
+    ("Purpose", "Source-labeled research triage. A policy ceiling is not a verified fair value, expected return or buy signal."),
+    ("Evidence", "Statement columns are selected as coherent periods. Missing facts remain unknown. Periods, quote time, source snapshots and run configuration are retained."),
+    ("Automatic operating proxy", "Positive NOPAT, funded growth and book ROIC including acquisition capital. Book ROIC is not observed marginal ROIC. No automatic capital release on contraction; each period and terminal funding must be feasible."),
+    ("Return persistence", "Absent an explicit sourced return path, ROIC fades to the lower of current ROIC and the policy hurdle. This is a screening assumption, not an estimated competitive-advantage duration."),
+    ("Operating stress", "Base and stress use the same discount rate. Lower growth need not mean lower value when investment destroys value; crossings are disclosed, never sorted or clipped into a false downside bound."),
+    ("Country risk", "Separate from reporting currency. Explicit issuer assumptions override a labeled provider-country proxy. Unknown country risk blocks valuation. Government yields and premiums are policy inputs, not automatically sourced market estimates."),
+    ("Sector models", "Explicit operating forecasts; bank/insurer/broker capital distributions; common-equity REIT AFFO; regulated rate-base cash flows with lag runoff; attributable NAV; finite-life projects with funding/closure costs. Required source-backed inputs cannot be replaced by zeros."),
+    ("Applicability", "Bank/insurance/REIT/regulated/hybrid models require explicit sector inputs. Short cyclical histories are data flags. Preprofit/holdco names can use an applicable sourced model; otherwise they abstain."),
+    ("Entry score", "100 x (1 - market cap / positive policy equity ceiling), displayed with a -100 floor; raw score retained. Eligibility is independent of peers and blocked by missing essentials or critical evidence flags."),
+    ("Implied yield", "Discount rate matching the modeled flow claim: firm yield for FCFF; equity yield for financial distributions. It is not universally a shareholder return. Multiple, weakly identified, invalid and absent growth solutions have separate statuses."),
+    ("FX parity", "An illustrative rate-parity scenario using compound rate ratios, not expected unhedged EUR return or an executed hedge."),
+    ("Claims and cash", "Firm-to-common-equity bridge includes debt, selected cash, minorities and preferred claims. Other claims require issuer review; all-cash treatment and book claims remain proxy assumptions unless explicitly reconciled."),
+    ("Validation boundary", "Counterexample, reference and corpus tests validate mechanics and abstention. They do not establish investment predictiveness. Experimental ideas are excluded from production."),
 ]
+
 
 
 def _fmt_sheet(ws, cols: list[str], highlight: list[str]):
@@ -160,20 +170,27 @@ def changes_vs_previous(df: pd.DataFrame, history_dir: Path, today: str) -> pd.D
     return out
 
 
-def write(df: pd.DataFrame, resolution: pd.DataFrame, out_dir: Path, history_dir: Path, cfg: dict) -> tuple[Path, Path]:
-    today = date.today().isoformat()
+def write(df: pd.DataFrame, resolution: pd.DataFrame, out_dir: Path, history_dir: Path, cfg: dict, *, run_date:date|None=None) -> tuple[Path, Path]:
+    today = (run_date or date.today()).isoformat()
     out_dir, history_dir = Path(out_dir), Path(history_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     history_dir.mkdir(parents=True, exist_ok=True)
     changes = changes_vs_previous(df, history_dir, today)
     stem = run_stem(history_dir, today)
     df.to_csv(history_dir / f"{stem}.csv", index=False)
+    provenance=history_dir/"provenance"
+    provenance.mkdir(exist_ok=True)
+    sources={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(__file__).parent.glob("*.py")}
+    with (provenance/f"{stem}.json").open("x",encoding="utf-8") as fh:
+        json.dump({"run":stem,"date":today,"configuration":cfg,"implementation_sha256":sources,
+                   "evidence_columns":[c for c in df.columns if c.startswith("source_") or c.startswith("filing_") or c in ("statement_periods","quote_metadata","price_as_of","fx_observations")]},fh,indent=2,default=str)
 
-    ops = df[df["class"].isin(["operating", "cyclical"])]
+
+    ops = df[df["class"].isin(["operating", "cyclical", "asset"])]
     fin = df[df["class"] == "financial"]
     pre = df[df["class"] == "preprofit"]
     blocked = df[df["status"] == "not rankable"] if "status" in df else df.iloc[0:0]
-    other = df[~df["class"].isin(["operating", "cyclical", "financial", "preprofit"])]
+    other = df[~df["class"].isin(["operating", "cyclical", "asset", "financial", "preprofit"])]
     cands = df[df["candidate"].fillna(False).astype(bool)]
     if len(resolution):
         auto = ~resolution["method"].isin(["override", "given"])  # deliberate mappings need no review
@@ -195,7 +212,7 @@ def write(df: pd.DataFrame, resolution: pd.DataFrame, out_dir: Path, history_dir
         sym_check.to_excel(w, sheet_name="Symbol check", index=False)
         rates = ", ".join(f"{k} {r['rf']:.2%}/{r['g']:.1%}" for k, r in sorted(cfg.get("rates", {}).items()))
         pd.DataFrame(METHOD + [("Equity risk premium", f"{v['equity_risk_premium']:.2%}"),
-                               ("Adverse floor spread", f"{v['adverse_return_spread']:.2%} over the 10y yield"),
+                               ("Stress discount basis", "same as base"),
                                ("Adverse growth haircut", f"{v['adverse_growth_haircut']:.1%}"),
                                ("Horizon / caps", f"{v['years']} years; growth {v['growth_floor']:.0%}..{v['growth_cap']:.0%}; return on capital ≤ {v['return_cap']:.0%}"),
                                ("Rates (10y yield / terminal g)", rates)],
@@ -256,7 +273,7 @@ def _markdown(df, cands, ops, fin, pre, blocked, changes, sym_check, cfg, today)
            "## Your holdings", "",
            _table(owned.sort_values("entry_score", ascending=False, na_position="last"), 60), ""]
     if len(changes):
-        out += ["## Changes since previous run", "", "| Symbol | Event | Reason | Score | Δ | Price Δ | Ceiling Δ |", "|---|---|---|---|---|---|---|"]
+        out += ["## Changes since previous run", "", "| Symbol | Event | Reason | Score | Î” | Price Î” | Ceiling Î” |", "|---|---|---|---|---|---|---|"]
         for r in changes.head(25).itertuples():
             out.append(f"| {r.symbol} | {r.event} | {r.reason} | {_n(r.entry_score)} | {_n(r.score_change)} | "
                        f"{_p(r.price_change)} | {_p(r.ceiling_change)} |")

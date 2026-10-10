@@ -8,6 +8,7 @@ import json
 import os
 import pickle
 import tomllib
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -42,7 +43,7 @@ def current_snapshot() -> dict:
     for f in sorted(FIXTURES.glob("*.pkl")):
         with open(f, "rb") as fh:  # our own fixture files
             data = pickle.load(fh)
-        m = metrics.compute(data, None, FrozenFX(), cfg, overrides.get(data["symbol"]))
+        m = metrics.compute(data, None, FrozenFX(), cfg, overrides.get(data["symbol"]),valuation_date=date(2026,10,10))
         rows.append({"symbol": data["symbol"], "name": "", "owned": False, "position_eur": None, "lists": "", "isin": "", **m})
     out = scoring.score(pd.DataFrame(rows), cfg)
     snap = {}

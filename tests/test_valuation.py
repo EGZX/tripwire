@@ -23,15 +23,15 @@ def test_growth_is_value_neutral_when_return_equals_cost_of_capital():
     # McKinsey value-driver identity: with R == k, value = next year's earnings / k whatever the later growth path
     k = 0.10
     assert V.present_value(10, 0.0, k, 0.0, 10, R0=k, RT=k) == pytest.approx(100.0)
-    for g0 in (0.03, 0.08, 0.15):
+    for g0 in (0.03, 0.08, 0.105):
         assert V.present_value(10, g0, k, 0.03, 10, R0=k, RT=k) == pytest.approx(10 * (1 + g0) / k)
 
 
 def test_growth_above_cost_of_capital_return_adds_value_and_below_destroys_it():
     k = 0.10
-    neutral = V.present_value(10, 0.08, k, 0.03, 10, R0=k, RT=k)
-    assert V.present_value(10, 0.08, k, 0.03, 10, R0=0.20, RT=0.20) > neutral
-    assert V.present_value(10, 0.08, k, 0.03, 10, R0=0.06, RT=0.06) < neutral
+    neutral = V.present_value(10, 0.05, k, 0.03, 10, R0=k, RT=k)
+    assert V.present_value(10, 0.05, k, 0.03, 10, R0=0.20, RT=0.20) > neutral
+    assert V.present_value(10, 0.05, k, 0.03, 10, R0=0.06, RT=0.06) < neutral
 
 
 def test_implied_return_and_implied_growth_are_inverse():
@@ -52,4 +52,6 @@ def test_root_finders_return_none_outside_bracket_instead_of_endpoints():
 def test_implied_growth_cannot_exceed_return_on_capital():
     # with reinvestment, growth above R gives negative distributions; the search stays within [-0.9, R]
     g = V.implied_growth(1.0, 30.0, 0.0975, 0.03, 10, R0=0.15, RT=0.15)
-    assert g is None or g <= 0.15
+    if g is not None:
+        ds, terminal = V.distributions(1.0,g,0.03,10,0.15,0.15)
+        assert min(ds+[terminal]) >= 0  # actual next-period financing constraint

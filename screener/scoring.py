@@ -22,8 +22,12 @@ FINANCIAL = {
     "equity_to_assets": ("balance", True), "share_cagr": ("balance", False),
 }
 PILLARS = ["value", "quality", "growth", "balance"]
-SCORED = ("operating", "cyclical", "financial")
-CRITICAL_FLAGS = ("stale financials", "no market cap", "check one-offs", "thin capital")
+SCORED = ("operating", "cyclical", "financial", "asset")
+CRITICAL_FLAGS = ("stale financials", "no market cap", "check one-offs", "thin capital",
+                  "quote date unavailable", "quote refresh failed", "stale cache fallback",
+                  "country exposure unavailable", "short-window cycle proxy", "stale or future quote",
+                  "stale or future rates", "rate date unavailable", "filing verification unavailable")
+CRITICAL_FLAGS += ("stale or future FX","FX date unavailable")
 
 
 def percentiles(df: pd.DataFrame, spec: dict, weights: dict) -> pd.DataFrame:
@@ -33,7 +37,7 @@ def percentiles(df: pd.DataFrame, spec: dict, weights: dict) -> pd.DataFrame:
         for metric, (p, higher) in spec.items():
             if p != pillar or metric not in df:
                 continue
-            vals = pd.to_numeric(df[metric], errors="coerce")
+            vals = pd.to_numeric(df[metric], errors="coerce").replace([float("inf"),float("-inf")],float("nan"))
             df[f"pct_{metric}"] = (vals if higher else -vals).rank(pct=True) * 100
             cols.append(f"pct_{metric}")
         df[f"score_{pillar}"] = df[cols].mean(axis=1, skipna=True) if cols else float("nan")
@@ -52,13 +56,14 @@ def score(results: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         grp = results[results["class"].isin(classes)]
         if len(grp):
             parts.append(percentiles(grp, spec, weights))
-    rest = results[~results["class"].isin(SCORED)]
+    rest = results[~results["class"].isin(("operating","cyclical","financial"))]
     out = pd.concat(parts + [rest], ignore_index=True, sort=False)
 
     flags = out.get("flags", pd.Series("", index=out.index)).fillna("")
     critical = flags.str.contains("|".join(CRITICAL_FLAGS), regex=True)
     blocked = out.get("not_rankable", pd.Series("", index=out.index)).fillna("").astype(str).str.len() > 0
-    es = pd.to_numeric(out.get("entry_score"), errors="coerce")
+    es = pd.to_numeric(out.get("entry_score",pd.Series(float("nan"),index=out.index)), errors="coerce")
+    out["entry_score"]=es
     status = pd.Series("not rankable", index=out.index)
     status[es < 0] = "price above ceiling"
     status[es >= 0] = "eligible"
