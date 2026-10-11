@@ -63,8 +63,9 @@ less unusual items after their tax effect. A divestiture gain or a one-off
 write-up therefore cannot become a mature margin. Clean margins above the policy
 margin limit (default: 100% of revenue) are treated as one-offs on a tiny revenue
 base and excluded; losses of any size are kept. Own history sets the terminal
-margin only on a mostly profitable record (at least two positive periods and at
-least half of them); otherwise the dated industry reference applies. Cyclicals
+margin only on a mostly profitable record (at least two profitable fiscal years
+and at least half of them; the trailing twelve months overlap the last fiscal
+year and do not count as another period); otherwise the dated industry reference applies. Cyclicals
 start part of the way from the current towards the historical median margin.
 
 Existing explicit firm forecasts, regulatory-capital distributions, property AFFO,
@@ -123,8 +124,24 @@ Estimates in another currency than the statements (ADRs) use the provider's
 growth rate, which is currency-neutral. Next-twelve-month growth weights the
 current and next fiscal-year estimates by the share of the fiscal year still
 ahead. After the two estimate years, excess growth over terminal growth halves
-every policy half-life (default two years); one estimate is never compounded for
-a decade.
+every policy half-life (default half a year); one estimate is never compounded
+for a decade. Equity needed per added dollar of revenue moves only a quarter of
+the way (policy capital_fade) from today's level towards the mature level at
+which new equity earns just the hurdle; the terminal value always uses the
+mature level. Both defaults come from the fundamentals backtest
+(tools/backtest_fundamentals.py, 2012-2016 cohorts, 10-year outcomes): companies
+needed 0.51 of equity per added dollar of revenue against 0.76 assumed at full
+convergence, and with these settings realized/model value is 1.03 pooled and
+1.02 for the typical company. Companies starting above 20% growth remain
+overvalued in the typical case (0.78): only about one in seven sustained 15%
+revenue growth for five years.
+
+Analyst EPS consensus is often on an adjusted basis that does not tie to reported
+EPS, so its levels are not used; its growth rates are. Years 1-2 margins apply
+the consensus earnings growth (time-weighted like revenue) to reported clean
+income, then fade linearly to the terminal margin. A forecast earnings collapse
+or ramp therefore reaches the valuation; without a positive consensus base the
+reported margin path is used.
 
 Annual EPS estimates need fiscal-period, currency and economic share-unit
 reconciliation. Same currency alone is insufficient for an ADR or another class.
@@ -148,7 +165,17 @@ validated before atomic replacement; failed refreshes preserve the old snapshot.
 [Margin data](https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/margin.html),
 [capital-investment data](https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/capex.html).
 
-Rates remain declared valuation/purchase-policy assumptions. A sourced equity
+Rates remain declared valuation/purchase-policy assumptions. For operating and
+cyclical businesses the equity risk premium is relevered for financial leverage
+(Hamada): multiplied by (1 + 0.75 D/E) / (1 + 0.75 D/E_ref), with D = net debt
+and preferred (surplus cash counts as zero), E = market capitalisation and
+D/E_ref = 0.084, the capitalisation-weighted S&P 500 nonfinancial level, so the
+market-average company keeps the configured premium. Regulated, property and
+financial families carry structural leverage against lower-risk assets and are
+not relevered (no asset beta is modeled). The backtest cannot test discount
+rates without prices; it shows leverage widening the downside tail of outcomes
+(10th percentile realized/model 0.18 with net cash, about -0.5 above 1x book
+net debt/equity) rather than lowering the typical outcome. A sourced equity
 rate and the policy hurdle value the same cash-flow path separately; the entry
 ceiling satisfies both price constraints. WACC requires a firm model. Missing
 local rates can use an explicit constant-FX/base-currency policy scenario. This
@@ -189,6 +216,13 @@ correctly. A new provider industry needs at most one line in the industry
 crosswalk, and a test checks every crosswalk target exists in the reference.
 
 ## Ranking and controls
+
+A candidate needs more than a price below the entry ceiling: its stress value
+must cover at least the policy share of the price (stress_floor, default half).
+Otherwise its status is "weak downside". In the backtest the realized value fell
+below the stress value for about 29% of companies (21-33% across growth
+groups), so the stress case is roughly a one-in-three bad outcome, and the floor
+asks that such an outcome still leaves half the price.
 
 A stock can have a conditional valuation without qualifying as a candidate.
 Missing essentials, invalid economic domains and contradictory used evidence

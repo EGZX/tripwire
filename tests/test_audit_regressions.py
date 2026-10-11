@@ -157,6 +157,7 @@ def test_parent_income_cannot_be_combined_with_aggregate_ownership():
     assert 'ownership scope' in market.ownership_check(info,1.126e9,4.896e9,{})
     assert market.ownership_check(info,1e9,1e9,{}) is None # multiclass alone does not prove a contradiction
 
+@pytest.mark.usefixtures("neutral_leverage")
 def test_country_risk_is_independent_of_reporting_currency():
     d=operating();d['info']['country']='Brazil'
     cfg={**CFG,'country_risk':{'Brazil':{'premium':.035,'source':'controlled test'}}}
@@ -165,6 +166,7 @@ def test_country_risk_is_independent_of_reporting_currency():
     assert m['hurdle']==pytest.approx(.13)
     assert m['floor_rate']==m['hurdle']
 
+@pytest.mark.usefixtures("neutral_leverage")
 def test_sourced_geographic_weights_override_domicile_and_currency():
     p={'source':'controlled exposure table','as_of':'2026-06-30','period_end':'2026-06-30','currency':'USD',
        'geographic_exposures':{'United States':.6,'Brazil':.4}}

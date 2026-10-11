@@ -48,7 +48,10 @@ EQUITY = ["StockholdersEquity", "StockholdersEquityIncludingPortionAttributableT
 DIVIDENDS = ["PaymentsOfDividendsCommonStock", "PaymentsOfDividends"]
 BUYBACKS = ["PaymentsForRepurchaseOfCommonStock"]
 ISSUANCE = ["ProceedsFromIssuanceOfCommonStock", "ProceedsFromStockOptionsExercised"]
-KEEP = set(REVENUE + INCOME + DISCONTINUED + EQUITY + DIVIDENDS + BUYBACKS + ISSUANCE)
+TOTAL_DEBT = ["LongTermDebt", "LongTermDebtAndCapitalLeaseObligations"]
+DEBT_PARTS = ["LongTermDebtNoncurrent", "LongTermDebtCurrent", "DebtCurrent", "ShortTermBorrowings", "CommercialPaper"]
+CASH = ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"]
+KEEP = set(REVENUE + INCOME + DISCONTINUED + EQUITY + DIVIDENDS + BUYBACKS + ISSUANCE + TOTAL_DEBT + DEBT_PARTS + CASH)
 FACTS_VERSION = hashlib.sha1(",".join(sorted(KEEP)).encode()).hexdigest()[:8]  # cache follows the concept list
 # SIC ranges: finance, insurance and real estate use other models; these use the cyclical family.
 FINANCIAL = range(6000, 6800)
@@ -197,6 +200,21 @@ def inputs(payload: dict, known: date, used: dict) -> dict | None:
     return {"income_stmt": inc, "balance_sheet": bal, "info": {"financialCurrency": "USD", "industry": ""}}
 
 
+def net_debt(payload: dict, end: pd.Timestamp, known: date) -> float:
+    """Book net debt at a fiscal year end as known then: total debt (or its parts) less cash. NaN if unknown."""
+    at = lambda concepts: annual(payload, concepts, instant=True, known=known).get(end, math.nan)
+    debt = at(TOTAL_DEBT)
+    if not math.isfinite(debt):
+        parts = [at([c]) for c in ("LongTermDebtNoncurrent", "LongTermDebtCurrent")]
+        if not any(math.isfinite(x) for x in parts):
+            parts = [at(["LongTermDebtNoncurrent"]), at(["DebtCurrent"])]
+        debt = sum(x for x in parts if math.isfinite(x)) if any(math.isfinite(x) for x in parts) else math.nan
+    else:
+        debt += sum(x for x in (at(["ShortTermBorrowings"]), at(["CommercialPaper"])) if math.isfinite(x))
+    cash = at(CASH)
+    return debt - (cash if math.isfinite(cash) else 0.0)
+
+
 def outcomes(payload: dict, start: pd.Timestamp, years: int, used: dict) -> dict[int, dict]:
     """Reported results for forecast years 1..years: fiscal years ending ~t years after the last known one."""
     series = {name: annual(payload, concepts, instant=name == "equity", first=True) for name, concepts in
@@ -259,7 +277,8 @@ def run_firm(cik: int, cohort: int, cfg: dict, years: int):
                 terminal=base["terminal_cashflow"], opening=base["opening_distribution"],
                 g0=plan["base"]["growth"], margin0=plan["base"]["margin_start"], margin_t=plan["base"]["margin_terminal"],
                 intensity=plan["base"]["equity_to_sales"], revenue0=actual[0]["revenue"], income0=actual[0]["clean_income"],
-                equity0=actual[0].get("equity"), years_observed=max(actual))
+                equity0=actual[0].get("equity"), years_observed=max(actual),
+                net_debt0=net_debt(payload, last, known))
     rows = []
     equity = actual[0].get("equity")
     for f in base["ledger"]:
@@ -326,15 +345,36 @@ def summarise(firms: pd.DataFrame, fy: pd.DataFrame, skipped: dict, years: int) 
         last = g[g.year == years].iloc[0]
         tv = m.value - m.opening - pv_f                 # model terminal PV
         scale = last.a_income / last.f_income if last.f_income > 0 else math.nan
-        vals.append(dict(value=m.value, pv_f=pv_f, pv_a=pv_a, tv=tv, tv_a=tv * scale if scale == scale else math.nan))
-    v = pd.DataFrame(vals).dropna()
+        vals.append(dict(value=m.value, pv_f=pv_f, pv_a=pv_a, tv=tv, tv_a=tv * scale if scale == scale else math.nan, g0=m.g0,
+                         stress=m.stress_value, opening=m.opening, equity0=m.equity0,
+                         net_debt0=m.get("net_debt0", math.nan)))
+    v = pd.DataFrame(vals).dropna(subset=["pv_f", "pv_a", "tv", "tv_a"])
+    v = v[(v.pv_f + v.tv) > 0]
     if len(v):
+        v["ratio"] = (v.pv_a + v.tv_a) / (v.pv_f + v.tv)
+        v["bucket"] = pd.cut(v.g0, [-1, 0, 0.05, 0.10, 0.20, 10], labels=["shrinking", "0-5%", "5-10%", "10-20%", "above 20%"])
+        by = ["", "| Starting growth | Companies | Actual / model, pooled | Actual / model, median |", "|---|---|---|---|"]
+        for name, d in v.groupby("bucket", observed=True):
+            by.append(f"| {name} | {len(d)} | {(d.pv_a.sum() + d.tv_a.sum()) / (d.pv_f.sum() + d.tv.sum()):.2f} | {d.ratio.median():.2f} |")
+        # Stress case: how often did the realized value fall below the model's stress value?
+        realized = v.opening + v.pv_a + v.tv_a
+        by += ["", "| Starting growth | Realized below stress value | Realized below half the base value |", "|---|---|---|"]
+        for name, d in v.assign(realized=realized).groupby("bucket", observed=True):
+            by.append(f"| {name} | {(d.realized < d.stress).mean():.0%} | {(d.realized < 0.5 * d.value).mean():.0%} |")
+        by.append(f"| all | {(realized < v.stress).mean():.0%} | {(realized < 0.5 * v.value).mean():.0%} |")
+        # Leverage: do indebted companies have wider and worse outcomes relative to the model?
+        lev = (v.net_debt0 / v.equity0).where(v.equity0 > 0, math.inf)
+        v["lev"] = pd.cut(lev, [-math.inf, 0, 0.5, 1.0, 2.0, math.inf], labels=["net cash", "0-0.5", "0.5-1", "1-2", "above 2 or negative equity"])
+        by += ["", "| Book net debt / equity | Companies | Median actual / model | 10th percentile | 25th percentile | Below half the model value |", "|---|---|---|---|---|---|"]
+        for name, d in v.dropna(subset=["lev"]).groupby("lev", observed=True):
+            by.append(f"| {name} | {len(d)} | {d.ratio.median():.2f} | {d.ratio.quantile(.1):.2f} | {d.ratio.quantile(.25):.2f} | {(d.ratio < 0.5).mean():.0%} |")
         lines += ["", f"## Value check (companies reporting all {years} years: {len(v)})", "",
                   f"- 10-year distributions, present value at the hurdle: actual / forecast = **{v.pv_a.sum() / v.pv_f.sum():.2f}**",
                   f"- Terminal value rescaled by actual / forecast year-{years} earnings: **{v.tv_a.sum() / v.tv.sum():.2f}** x the model's",
                   f"- Combined (actual 10-year distributions + rescaled terminal) / (forecast 10-year + model terminal): "
                   f"**{(v.pv_a.sum() + v.tv_a.sum()) / (v.pv_f.sum() + v.tv.sum()):.2f}**",
-                  "", "Above 1: companies delivered more than the model assumed (forecasts biased low). Below 1: less."]
+                  f"- Typical company (median): **{v.ratio.median():.2f}**",
+                  "", "Above 1: companies delivered more than the model assumed (forecasts biased low). Below 1: less.", *by]
     key = lambda df: df.cik.astype(str) + "-" + df.cohort.astype(str)
     exited = set(key(firms[firms.years_observed < years]))
     exits = firms[firms.years_observed < years]
@@ -352,10 +392,14 @@ def main(argv=None) -> int:
     ap.add_argument("--cohorts", default="2012,2013,2014,2015,2016")
     ap.add_argument("--size", type=int, default=500)
     ap.add_argument("--years", type=int, default=10)
+    ap.add_argument("--policy", action="append", default=[], metavar="KEY=VALUE",
+                    help="test a [model_policy] setting, e.g. growth_half_life=1.5 (repeatable)")
+    ap.add_argument("--out", default="", help="suffix for the output files, e.g. _hl15")
     args = ap.parse_args(argv)
     warnings.filterwarnings("ignore")
     cfg = load_config(ROOT / "config.toml")
-    policy.configure(cfg)
+    overrides = {k: float(v) for k, v in (x.split("=", 1) for x in args.policy)}
+    policy.configure({"model_policy": {**cfg.get("model_policy", {}), **overrides}})
     metas, rows, skipped = [], [], {}
     for cohort in (int(x) for x in args.cohorts.split(",")):
         ciks = universe(cohort, args.size)
@@ -372,10 +416,12 @@ def main(argv=None) -> int:
                 print(f"  {i}/{len(ciks)}", flush=True)
     firms, fy = pd.DataFrame(metas), pd.DataFrame(rows)
     OUT.mkdir(parents=True, exist_ok=True)
-    firms.to_csv(OUT / "firms.csv", index=False)
-    fy.to_csv(OUT / "firm_years.csv", index=False)
+    firms.to_csv(OUT / f"firms{args.out}.csv", index=False)
+    fy.to_csv(OUT / f"firm_years{args.out}.csv", index=False)
     text = summarise(firms, fy, skipped, args.years)
-    (OUT / "summary.md").write_text(text, encoding="utf-8")
+    if overrides:
+        text = text.replace("\n\n", f"\n\nPolicy tested: {overrides}\n\n", 1)
+    (OUT / f"summary{args.out}.md").write_text(text, encoding="utf-8")
     print(text)
     return 0
 

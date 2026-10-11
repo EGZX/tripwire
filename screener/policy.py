@@ -18,12 +18,30 @@ class Policy:
     Losses beyond it are kept: they are real."""
     cyclical_normalisation: float = 0.5
     """Cyclicals start this far from the current margin towards their historical median (0 = current, 1 = median)."""
-    growth_half_life: float = 2.0
-    """Years after the two estimate years in which excess growth over terminal growth halves."""
+    growth_half_life: float = 0.5
+    """Years after the two estimate years in which excess growth over terminal growth halves. Chosen with
+    capital_fade in the 2012-2016 fundamentals backtest (tools/backtest_fundamentals.py): with today's capital
+    needs, slower fades overvalued high growers; growth rates are known to persist little."""
     estimate_base_tolerance: float = 0.15
     """Revenue-growth estimates are used only if their base-year revenue matches reported revenue within this share."""
+    capital_fade: float = 0.25
+    """Share of the way equity per added revenue moves from today's level to the mature level (new equity earning
+    only the hurdle) by the end of the forecast. 1 = full convergence; 0 = today's capital needs persist until the
+    terminal value. Backtest: companies needed 0.51 equity per added revenue against 0.76 assumed at full fade,
+    close to their starting 0.41; 0.25 removes the overall bias (actual / model value 1.07 -> ~1.02)."""
     min_reference_firms: int = 20
     """Industry references with fewer firms fall back to the broad nonfinancial reference."""
+    # ---- required return
+    reference_net_debt_to_equity: float = 0.084
+    """Market reference leverage: capitalisation-weighted net debt / market cap of S&P 500 nonfinancials
+    (positive net debt only), measured 2026-10-11 from the provider data the screener uses."""
+    leverage_tax_rate: float = 0.25
+    """Tax shield in the Hamada relevering of the equity risk premium."""
+    max_leverage_factor: float = 3.0
+    """Upper bound on the leverage multiplier of the equity risk premium."""
+    stress_floor: float = 0.5
+    """A candidate's stress (adverse) value must cover at least this share of the market price; otherwise the
+    status is 'weak downside'. 0 disables the floor."""
     # ---- financial (common-equity) model
     franchise_share: float = 0.5
     """Share of today's excess return over the hurdle a mature franchise keeps (base case)."""

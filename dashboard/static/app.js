@@ -11,9 +11,9 @@ const S = {
   sort: { key: "entry_score", dir: -1 }, colset: "decision",
   holdSort: { key: "position_eur", dir: -1 }, entrySort: { key: "position_eur", dir: -1 }, changeSort: { key: "score_change_abs", dir: -1 },
 };
-const SCORED = ["eligible", "data flag", "price above ceiling"];
-const STATUS_ORDER = ["eligible", "data flag", "price above ceiling", "not rankable", "not screened"];
-const STATUS_LABEL = { "eligible": "Candidate", "data flag": "Data flag", "price above ceiling": "Above ceiling",
+const SCORED = ["eligible", "weak downside", "data flag", "price above ceiling"];
+const STATUS_ORDER = ["eligible", "weak downside", "data flag", "price above ceiling", "not rankable", "not screened"];
+const STATUS_LABEL = { "eligible": "Candidate", "weak downside": "Weak downside", "data flag": "Data flag", "price above ceiling": "Above ceiling",
   "not rankable": "Not rankable", "not screened": "Not screened" };
 const CLIP_LO = -100, CLIP_HI = 100;  // the screener floors the entry score at -100 (price >= 2x the ceiling)
 const TICKS = [-100, -75, -50, -25, 0, 25, 50, 75, 100];
@@ -435,6 +435,7 @@ function viewOverview() {
     kpi("Candidates", String(cands.length), hasPrev ? "previous run " + prevCands : null, { hero: true, status: "eligible", onclick: () => filterTo("eligible"),
       deltaCls: hasPrev ? (cands.length > prevCands ? "up" : cands.length < prevCands ? "down" : "") : "", title: "Entry score ≥ 0 and no critical data flag" }),
     kpi("Above ceiling", String(by("price above ceiling")), null, { status: "price above ceiling", onclick: () => filterTo("price above ceiling") }),
+    kpi("Weak downside", String(by("weak downside")), null, { title: "Below the ceiling, but the stress value covers less than the policy share of the price", status: "weak downside", onclick: () => filterTo("weak downside") }),
     kpi("Data flag", String(by("data flag")), null, { title: "Scored, but a critical data flag blocks candidate status", status: "data flag", onclick: () => filterTo("data flag") }),
     kpi("Not rankable", String(by("not rankable")), null, { title: "An essential input is missing", status: "not rankable", onclick: () => filterTo("not rankable") }),
     kpi("Not screened", String(by("not screened")), null, { title: "Fund or instrument outside individual-equity models", status: "not screened", onclick: () => filterTo("not screened") }),
@@ -734,7 +735,7 @@ function entryChart(rows) {
 }
 function statusBar(parts, total) {
   if (!(total > 0)) return h("div", { class: "empty", text: "No position values." });
-  const colors = { "eligible": "var(--fg-ok)", "data flag": "var(--warning-accent)", "price above ceiling": "var(--neg)", "not rankable": "var(--fg-err)", "not screened": "var(--neutral-mark)", "unknown": "var(--grid-major)" };
+  const colors = { "eligible": "var(--fg-ok)", "weak downside": "var(--fg-warn)", "data flag": "var(--warning-accent)", "price above ceiling": "var(--neg)", "not rankable": "var(--fg-err)", "not screened": "var(--neutral-mark)", "unknown": "var(--grid-major)" };
   const W = 1000, Hh = 26, gap = 2;
   const svgEl = s("svg", { class: "chart", viewBox: `0 0 ${W} ${Hh}`, preserveAspectRatio: "none", style: { height: "26px" }, role: "img", "aria-label": "Holdings value by status" });
   let x = 0;

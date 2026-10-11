@@ -184,6 +184,7 @@ def test_unused_firm_debt_constraint_does_not_block_after_interest_equity_model(
     assert result['implied_return_claim']=='equity'
 
 
+@pytest.mark.usefixtures("neutral_leverage")
 def test_declared_equity_rate_and_purchase_hurdle_discount_the_same_cashflow_path():
     cfg=config();cfg['issuer_inputs']={'TEST':evidence(discount_rate=.12,discount_rate_basis='cost_of_equity')}
     result=compute(issuer(),cfg)

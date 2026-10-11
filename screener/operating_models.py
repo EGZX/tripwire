@@ -150,6 +150,27 @@ def growth_path(g1,g2,gt,years):
     return path
 
 
+def earnings_growths(estimates,income_date,last_fy_end):
+    """Consensus earnings growth for the next twelve months and the year after, from annual EPS levels.
+
+    Only growth RATES are used: consensus EPS is often on an adjusted basis that does not tie to reported EPS,
+    but its growth is comparable and applies to reported clean income. NTM and TTM are both time-weighted
+    across the fiscal years they overlap. Returns (ntm_growth, next_growth, basis) or (None, None, reason)."""
+    if not isinstance(estimates,pd.DataFrame) or not {'avg','yearAgoEps'}<=set(estimates.columns):
+        return None,None,'no annual EPS consensus'
+    value=lambda p,c:estimates.loc[p,c] if p in estimates.index else math.nan
+    e_prev,e0,e1=value('0y','yearAgoEps'),value('0y','avg'),value('+1y','avg')
+    if not all(finite(x) for x in (e_prev,e0,e1)) or e_prev<=0 or e0<=0:
+        return None,None,'EPS consensus incomplete or base year not positive'
+    w=1.0
+    if income_date is not None and last_fy_end is not None:
+        fy0_end=last_fy_end+pd.DateOffset(years=1)
+        w=min(1.0,max(0.0,(fy0_end-income_date).days/(fy0_end-last_fy_end).days))
+    ntm,ttm=w*e0+(1-w)*e1,w*e_prev+(1-w)*e0
+    if ttm<=0:return None,None,'trailing consensus earnings not positive'
+    return ntm/ttm-1,e1/e0-1,f'consensus EPS growth, time-weighted ({w:.0%} current fiscal year); applied to reported clean income'
+
+
 def clean_margins(data,historical):
     """Annual clean common margins (continuing operations, before after-tax unusual items) and exclusions."""
     clean=S.clean_common_income(data.get('income_stmt'));out=[];excluded=[]
@@ -221,11 +242,13 @@ def build(data,selections,context):
     else:first_margin=current_margin
     if not finite(first_margin):raise V.InvalidModel('reported common margin is required')
     positive=[m for m in margins if m>0]
+    # The record is judged on fiscal years: a TTM overlapping the last fiscal year is not an independent period.
+    annual_positive=[m for m in history_margins if m>0]
     # A mature margin needs a mostly profitable record; one good year among losses (often non-operating) is not one.
-    profitable_record=len(positive)>=2 and len(positive)>=len(margins)/2
-    terminal=median(positive) if profitable_record else ref['net_margin']
+    profitable_record=len(annual_positive)>=2 and len(annual_positive)>=len(history_margins)/2
+    terminal=median(annual_positive) if profitable_record else ref['net_margin']
     terminal_basis=('median clean positive margin over a mostly profitable record' if profitable_record else
-                    'industry reference: own record is not mostly profitable ('+str(len(positive))+' of '+str(len(margins))+' periods)')
+                    'industry reference: own record is not mostly profitable ('+str(len(annual_positive))+' of '+str(len(history_margins))+' fiscal years)')
     terminal=max(0.0,terminal) # zero is an explicit no-profitable-continuation endpoint
     equity=S.latest(bal,'common_equity')
     intensity=_ratio(equity,revenue)
@@ -249,7 +272,19 @@ def build(data,selections,context):
     # Recovery to an industry/history reference is explicitly conditional.
     # Own history sets the stress floor when it is long enough; a small-sample industry average does not.
     terminals=[terminal,*positive] if len(positive)>=3 else [terminal,max(0.0,ref['net_margin']),*positive]
-    starts=margins+[first_margin]
+    # Analysts' earnings path for years 1-2 (as growth rates on reported clean income), then a linear fade to
+    # the terminal margin. Without it, a known earnings collapse or ramp would be invisible to the margin path.
+    margin_path=None;earnings_basis='no usable EPS consensus'
+    base_income=clean_current if finite(clean_current) else observed_income
+    ge1,ge2,earnings_basis=earnings_growths(data.get('earnings_estimate'),selections['income'].date,last_fy_end)
+    if ge1 is not None and finite(base_income) and base_income>0:
+        r1=revenue*(1+g0);r2=r1*(1+next_growth)
+        m1=base_income*(1+ge1)/r1;m2=base_income*(1+ge1)*(1+ge2)/r2
+        if max(m1,m2)<=policy().margin_limit:
+            margin_path=[m1,m2][:years]+[m2+(terminal-m2)*(t-2)/(years-2) for t in range(3,years+1)]
+        else:earnings_basis='consensus margins above the margin limit; not used'
+    elif ge1 is not None:earnings_basis='reported clean income not positive; consensus growth cannot be applied'
+    starts=margins+[first_margin]+(margin_path[:2] if margin_path else [])
     if forecast.get('basis')=='annual EPS consensus interpolated to next twelve months':
         starts.extend(forecast[k]/(revenue*(1+g0)) for k in ('avg','low','high') if k in forecast)
         F.merge_dependencies(dependencies,forecast)
@@ -258,7 +293,8 @@ def build(data,selections,context):
     def params(g,start,end,capital,g2=None):
         return dict(revenue=revenue,growth=g,growth_path=growth_path(g,g if g2 is None else g2,gt,years),margin_start=start,
                     margin_terminal=end,equity_to_sales=capital,terminal_equity_return=rate,terminal_growth=gt)
-    base=params(g0,first_margin,terminal,intensity,next_growth)
+    base=params(g0,margin_path[0] if margin_path else first_margin,terminal,intensity,next_growth)
+    if margin_path:base['margin_path']=margin_path
     # Stress must lower value. Lower growth lowers value only when new equity earns more than the hurdle, so both
     # growth directions are priced and the lower one is kept.
     stress_options=[params(g,min(starts),min(terminals),max(intensity_observations)) for g in (min(growth_cases),g0)]
@@ -282,7 +318,8 @@ def build(data,selections,context):
             'assumptions':list(forecast.get('assumptions',[]))+[
                 {'parameter':'initial_growth','value':g0,'basis':growth_source},
                 {'parameter':'growth_path','value':base['growth_path'],'basis':'years 1-2 from the estimates, then excess growth halves every '+f'{policy().growth_half_life:g}'+' years'},
-                {'parameter':'first_margin','value':first_margin,'basis':'clean common margin (TTM); cyclicals halfway to their historical median; listing-specific EPS forecasts are scenario overlays'},
+                {'parameter':'first_margin','value':base['margin_start'],'basis':'consensus earnings growth on reported clean income / forecast revenue' if margin_path else 'clean common margin (TTM); cyclicals part-way to their historical median'},
+                {'parameter':'margin_path','value':margin_path,'basis':earnings_basis+('; years 3+ fade linearly to the terminal margin' if margin_path else '')},
                 {'parameter':'terminal_margin','value':terminal,'basis':terminal_basis},
                 {'parameter':'equity_to_sales','value':intensity,'basis':intensity_basis},
                 {'parameter':'terminal_equity_return','value':rate,'basis':'new investment earns the policy equity return at maturity; no perpetual excess return assumed'},
@@ -313,9 +350,16 @@ def project(p,years,rate,gt=None):
         growths=list(supplied)+[gt];growth=growths[0]
     else:growths=V.fade(growth,gt,years)+[gt]
     opening=-revenue*max(growth,0)*intensity
-    capitals=V.fade(intensity,mature_intensity,years)+[mature_intensity]
+    # Equity per added revenue moves from today's level towards the mature level (new equity earning the hurdle)
+    # only by the policy share during the forecast; the terminal value always uses the mature level.
+    capitals=V.fade(intensity,intensity+policy().capital_fade*(mature_intensity-intensity),years)+[mature_intensity]
     flows=[];ledger=[]
-    for year,(g,margin) in enumerate(zip(growths,V.fade(m0,mt,years)),1):
+    margins=p.get('margin_path')
+    if margins is not None:
+        if not isinstance(margins,(list,tuple)) or len(margins)!=years:raise V.InvalidModel('margin_path must contain one margin per forecast year')
+        V.finite(*margins)
+    else:margins=V.fade(m0,mt,years)
+    for year,(g,margin) in enumerate(zip(growths,margins),1):
         revenue*=1+g
         earnings=revenue*margin;investment=revenue*max(growths[year],0)*capitals[year]
         distribution=earnings-investment

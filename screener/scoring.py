@@ -6,6 +6,7 @@ The pillar percentiles (value / quality / growth / balance) are shown as context
 from __future__ import annotations
 
 import pandas as pd
+from . import policy
 
 # metric -> (pillar, higher_is_better)
 OPERATING = {
@@ -73,6 +74,11 @@ def score(results: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     status = pd.Series("not rankable", index=out.index)
     status[es < 0] = "price above ceiling"
     status[es >= 0] = "eligible"
+    # A candidate's bad case must still cover the policy share of the price; otherwise the downside is too weak.
+    floor = policy.get().stress_floor
+    adverse = pd.to_numeric(out.get("value_adverse", pd.Series(float("nan"), index=out.index)), errors="coerce")
+    cap = pd.to_numeric(out.get("mcap_fc", pd.Series(float("nan"), index=out.index)), errors="coerce")
+    status[(es >= 0) & (adverse < floor * cap)] = "weak downside"
     status[critical & es.notna()] = "data flag"
     status[blocked] = "not rankable"
     status[~out["class"].isin(SCORED)] = "not screened"

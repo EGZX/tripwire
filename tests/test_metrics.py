@@ -88,6 +88,7 @@ def test_entry_score_example_from_design():
     assert math.isnan(metrics.entry_score(60, 0))
 
 
+@pytest.mark.usefixtures("neutral_leverage")
 def test_absent_debt_is_unknown_not_assumed_zero():
     # Missing rows do not prove zero; require a reconciled source.
     d = operating()
@@ -100,6 +101,7 @@ def test_absent_debt_is_unknown_not_assumed_zero():
     assert 'Unknown is not zero' in m['model_uncertainties']
 
 
+@pytest.mark.usefixtures("neutral_leverage")
 def test_incomplete_debt_is_not_fabricated_or_deducted_from_common_income():
     d = operating()
     for key in ("balance_sheet", "quarterly_balance_sheet"):
@@ -146,6 +148,7 @@ def test_entry_score_is_floored_at_minus_100():
     assert metrics.entry_score(300, 75) == -100
 
 
+@pytest.mark.usefixtures("neutral_leverage")
 def test_rates_stay_above_terminal_growth_by_the_configured_margin():
     d = operating()
     d["info"]["financialCurrency"] = "CHF"
@@ -162,6 +165,7 @@ def test_old_cash_flow_statement_is_not_a_critical_stale_flag():
     assert "cash flow stale" in m["flags"] and "stale financials" not in m["flags"]
 
 
+@pytest.mark.usefixtures("neutral_leverage")
 def test_missing_local_rate_uses_explicit_constant_fx_base_policy_not_a_hidden_rate():
     d = operating()
     d["info"]["financialCurrency"] = "XYZ"
@@ -250,7 +254,7 @@ def cyclical(**over):
 def test_cyclical_model_preserves_common_margin_observations_and_cycle_uncertainty():
     m = run(cyclical(), cfg_with(cyclical_adverse_margin="min", cyclical_adverse_growth_at_terminal=True))
     assert m["class"] == "cyclical"
-    margins=[152/1000,138/909,124/826,112/751,159.6/1050]
+    margins=[152/1000,138/909,124/826,112/751]  # fiscal years; the overlapping TTM is not an extra period
     params=json.loads(m['scenario_parameters'])
     assert params['base']['margin_terminal']==pytest.approx(median(margins))
     assert params['stress']['margin_terminal']<=params['base']['margin_terminal']
@@ -305,6 +309,7 @@ def test_minimum_hurdle_applies_after_currency_lookup():
     assert json.loads(m['scenario_parameters'])['base']['terminal_equity_return']==pytest.approx(.07)
 
 
+@pytest.mark.usefixtures("neutral_leverage")
 def test_country_risk_premium_raises_both_rates():
     d = operating()
     d["info"]["financialCurrency"] = "KZT"

@@ -6,10 +6,11 @@ from numbers import Real
 import math
 
 
-def policy_rates(r:dict,v:dict,country_premium:float=0.0) -> dict:
-    """One canonical purchase-policy rate calculation; currency CRP is not used."""
+def policy_rates(r:dict,v:dict,country_premium:float=0.0,erp_factor:float=1.0) -> dict:
+    """One canonical purchase-policy rate calculation; currency CRP is not used.
+    erp_factor scales the equity risk premium for the issuer's financial leverage (see leverage_factor)."""
     least=r["g"]+v.get("min_rate_over_terminal_growth",0.02)
-    before_min=max(r["rf"]+v["equity_risk_premium"]+country_premium,least)
+    before_min=max(r["rf"]+v["equity_risk_premium"]*erp_factor+country_premium,least)
     hurdle=max(before_min,v.get("min_hurdle",0.0))
     return {"rf":r["rf"],"g":r["g"],"crp":country_premium,"hurdle":hurdle,"floor":hurdle,
             "min_hurdle_binds":hurdle>before_min}
@@ -70,3 +71,16 @@ def validate(cfg: dict, currencies: set[str]) -> list[str]:
         if ccy not in rates and (not base or base not in rates):
             errors.append(f"[rates] missing entry for reporting currency {ccy} and no base-currency policy for an explicit constant-FX scenario")
     return errors
+
+
+def leverage_factor(net_claims:float,market_cap:float) -> float:
+    """Equity risk premium multiplier for financial leverage relative to the market reference (Hamada relevering).
+
+    (1 + (1-t) D/E) / (1 + (1-t) D/E_ref) with D = net debt and other senior claims (floored at zero: surplus cash
+    is not negative debt), E = market capitalisation. The reference is the market's capitalisation-weighted
+    leverage, so the market-average company keeps the configured premium. Bounded by policy max_leverage_factor."""
+    from .policy import get as policy
+    p=policy()
+    if not (numeric(net_claims) and numeric(market_cap) and market_cap>0):return 1.0
+    relever=lambda ratio:1+(1-p.leverage_tax_rate)*ratio
+    return min(p.max_leverage_factor,relever(max(net_claims,0.0)/market_cap)/relever(p.reference_net_debt_to_equity))

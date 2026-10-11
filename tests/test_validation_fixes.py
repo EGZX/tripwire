@@ -70,7 +70,8 @@ def test_ntm_growth_uses_the_overlapping_fiscal_years():
 
 def test_growth_estimate_is_not_compounded_for_a_decade():
     path = O.growth_path(0.68, 0.40, 0.03, 10)
-    assert path[:2] == [0.68, 0.40] and path[-1] == pytest.approx(0.03 + 0.37 * 0.5 ** 4)
+    half_life = O.policy().growth_half_life
+    assert path[:2] == [0.68, 0.40] and path[-1] == pytest.approx(0.03 + 0.37 * 0.5 ** (8 / half_life))
     multiple = math.prod(1 + x for x in path)
     linear = math.prod(1 + 0.68 + (0.03 - 0.68) * t / 9 for t in range(10))
     assert multiple < linear / 2                                   # 18.6x revenue under the old linear fade
@@ -181,3 +182,63 @@ def test_every_industry_crosswalk_entry_points_at_a_reference_industry():
     # Adding a provider label is one line; a typo in the target would silently fall back to the broad reference.
     industries = O.references()["industries"]
     assert not {k: v for k, v in O.INDUSTRY_REFERENCE.items() if v not in industries}
+
+
+def test_consensus_earnings_collapse_reaches_the_margin_path():
+    # One-product pattern: consensus EPS 2.04 -> 0.495 -> 0.057 while the reported margin is 42%.
+    d = operating()
+    d["earnings_estimate"] = pd.DataFrame({"avg": [0.495, 0.057], "yearAgoEps": [2.04, 0.495]}, index=["0y", "+1y"])
+    with_consensus = run(d)
+    without = run(operating())
+    path = json.loads(with_consensus["scenario_parameters"])["base"]["margin_path"]
+    assert path[1] < path[0] < json.loads(without["scenario_parameters"])["base"]["margin_start"]
+    assert with_consensus["value_reasonable"] < without["value_reasonable"]
+
+
+def test_consensus_growth_needs_a_positive_base():
+    est = pd.DataFrame({"avg": [0.5, 0.8], "yearAgoEps": [-0.2, 0.5]}, index=["0y", "+1y"])
+    assert O.earnings_growths(est, pd.Timestamp("2025-12-31"), pd.Timestamp("2025-12-31"))[0] is None
+    ok = pd.DataFrame({"avg": [1.1, 1.21], "yearAgoEps": [1.0, 1.1]}, index=["0y", "+1y"])
+    g1, g2, _ = O.earnings_growths(ok, pd.Timestamp("2025-12-31"), pd.Timestamp("2025-12-31"))
+    assert g1 == pytest.approx(0.1) and g2 == pytest.approx(0.1)
+
+
+def test_profitable_record_counts_fiscal_years_not_the_overlapping_ttm():
+    d = operating()
+    _set(d, "income_stmt", "Net Income Common Stockholders", [-50, -40, -30, 60])   # one profitable fiscal year
+    _set(d, "ttm_income_stmt", "Net Income Common Stockholders", [70])              # TTM overlaps it
+    assumptions = json.loads(run(d)["model_assumptions"])
+    terminal = next(a for a in assumptions if isinstance(a, dict) and a.get("parameter") == "terminal_margin")
+    assert terminal["basis"].startswith("industry reference")
+
+
+def test_leverage_raises_the_premium_and_market_average_leverage_keeps_it():
+    from screener.checks import leverage_factor, policy_rates
+    from screener.policy import get
+    ref = get().reference_net_debt_to_equity
+    assert leverage_factor(ref * 1000, 1000) == pytest.approx(1.0)        # market-average leverage: unchanged
+    assert leverage_factor(-500, 1000) < 1.0                               # net cash: less risk per unit of equity
+    assert leverage_factor(950, 1000) == pytest.approx((1 + 0.75 * 0.95) / (1 + 0.75 * ref))
+    assert leverage_factor(1e9, 1) == get().max_leverage_factor
+    assert leverage_factor(float("nan"), 1000) == 1.0
+    rates = {"rf": 0.03, "g": 0.02}
+    v = {"equity_risk_premium": 0.045, "min_hurdle": 0.0}
+    assert policy_rates(rates, v, 0.0, 2.0)["hurdle"] == pytest.approx(0.03 + 0.09)
+
+
+def test_indebted_operating_company_gets_a_higher_hurdle():
+    d = operating()
+    plain = run(d)
+    d["balance_sheet"].loc["Total Debt"] = [5e4] * len(d["balance_sheet"].columns)
+    d["quarterly_balance_sheet"].loc["Total Debt"] = [5e4] * len(d["quarterly_balance_sheet"].columns)
+    levered = run(d)
+    assert levered["hurdle"] > plain["hurdle"] and levered["leverage_factor"] > 1
+
+
+def test_candidate_needs_a_stress_value_covering_the_policy_share_of_the_price():
+    cfg = {"scoring": {"w_value": .4, "w_quality": .3, "w_growth": .2, "w_balance": .1}}
+    floor = scoring.policy.get().stress_floor
+    row = lambda adverse: {"class": "operating", "entry_score": 20, "flags": "", "not_rankable": "",
+                           "value_adverse": adverse, "mcap_fc": 100.0}
+    status = scoring.score(pd.DataFrame([row(floor * 100 + 1), row(floor * 100 - 1), row(float("nan"))]), cfg)["status"]
+    assert list(status) == ["eligible", "weak downside", "eligible"]

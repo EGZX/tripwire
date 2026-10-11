@@ -27,7 +27,7 @@ def run_key(run: str) -> tuple[str, int]:
     return day, int(n) if n else 0
 
 
-SCORED_STATUSES = ("eligible", "data flag", "price above ceiling")
+SCORED_STATUSES = ("eligible", "weak downside", "data flag", "price above ceiling")
 # per-symbol fields tracked across runs
 TRACKED = ["price", "ceiling_px", "reasonable_px", "adverse_px", "entry_score", "status", "quote_ccy",
            "implied_return", "hurdle", "adverse_score"]

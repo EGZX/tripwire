@@ -175,6 +175,7 @@ input[type="search"] { width: 200px; }
 .status::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--fg-dim); flex: none; }
 .status.s-eligible::before { background: var(--fg-ok); }
 .status.s-data-flag::before { background: var(--warning-accent); }
+.status.s-weak-downside::before { background: transparent; box-shadow: inset 0 0 0 2px var(--fg-warn); }
 .status.s-price-above-ceiling::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--fg-dim); }
 .status.s-not-rankable::before { background: var(--fg-err); }
 .status.s-not-screened::before, .status.s-unknown::before { background: var(--grid-major); }

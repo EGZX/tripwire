@@ -16,7 +16,7 @@ from . import valuation as V
 from .fetch import FX, major_currency
 from . import statements as S, market, models, automatic, evidence_assembly, business_models
 from .inputs import validate_issuer
-from .checks import policy_rates
+from .checks import policy_rates, leverage_factor
 from .policy import get as policy
 
 from .statements import ROWS, row as _row, latest as _latest, annual as _annual, finite_series as _finite, statement_date as _date
@@ -455,6 +455,19 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
     net_debt = debt - cash  # NaN if either is missing
     ev = mcap + net_debt + minority + preferred + other_claims
     m.update(revenue=rev, ebit=ebit, net_income=ni, ev_fc=ev, net_debt_fc=net_debt)
+    if is_automatic and family in ("operating","cyclical") and rates is not None:
+        # Owners of an indebted business bear more risk per unit of equity: relever the premium. Only for operating
+        # and cyclical families, whose business risk the market-average reference approximates; regulated, property
+        # and financial families carry structural leverage against lower-risk assets (no asset beta is modeled).
+        claims=net_debt+(preferred if _isnum(preferred) else 0.0)
+        factor=leverage_factor(claims,mcap)
+        if _isnum(claims) and factor!=1.0:
+            calculated=policy_rates(rates,vcfg,crp,factor)
+            hurdle,floor=calculated["hurdle"],calculated["floor"]
+            m.update(hurdle=hurdle,floor_rate=floor)
+        m.update(leverage_factor=factor if _isnum(claims) else math.nan,
+                 equity_risk_premium_used=vcfg["equity_risk_premium"]*(factor if _isnum(claims) else 1.0))
+        if not _isnum(claims):flags.append("net debt unknown: equity risk premium not adjusted for leverage")
 
     today = pd.Timestamp(effective_date)
     m["valuation_date"]=today.date().isoformat()
