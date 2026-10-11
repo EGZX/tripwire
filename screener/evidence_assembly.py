@@ -19,7 +19,8 @@ from .fetch import major_currency
 
 
 INCOME_FLOWS = ("revenue", "gross", "ebit", "net_income", "pretax", "tax",
-                "interest", "rd", "consolidated_income", "minority_income", "preferred_dividends")
+                "interest", "rd", "consolidated_income", "minority_income", "preferred_dividends",
+                "discontinued_income", "unusual", "unusual_tax")
 CASH_FLOWS = ("ocf", "capex", "da", "sbc", "working_capital", "acquisitions", "investing_cashflow",
               "common_dividends", "net_common_issuance", "common_issuance", "common_repurchases")
 

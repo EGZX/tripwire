@@ -137,7 +137,11 @@ def test_builder_uses_common_book_and_aligned_consensus_not_total_equity():
     expected = (12 * weight + 14 * (1 - weight)) * 10
     assert result["base"]["common_equity"] == 1100
     assert result["base"]["roe_start"] == pytest.approx(expected / 1100)
-    assert result["base"]["roe_terminal"] == .10
+    # Mature franchise: hurdle plus half of today's excess return (capped at 5 points); new capital earns the hurdle.
+    base_roe = result["base"]["roe_start"]
+    assert result["base"]["roe_terminal"] == pytest.approx(.10 + min(.5 * max(0, base_roe - .10), .05))
+    assert result["base"]["terminal_incremental_return"] == .10 and result["base"]["self_funded"] is True
+    assert result["stress"]["roe_terminal"] == .10 and result["stress"]["roe_start"] <= .75 * base_roe
     assert result["stress"]["roe_start"] <= result["base"]["roe_start"] <= result["upside"]["roe_start"]
     assert result["base"]["book_growth_start"] == pytest.approx(sorted([64/700, 72/800, 80/900])[1])
     assert any("regulatory" in w for w in result["warnings"])
@@ -172,8 +176,10 @@ def test_missing_payouts_and_history_are_visible_assumptions_not_zero():
     data, selections, context = fixture()
     data["cashflow"] = pd.DataFrame()
     result = F.build(data, selections, context)
-    assert result["base"]["book_growth_start"] == pytest.approx(sorted([900/800-1, 800/700-1, 1000/900-1])[1])
-    assert any("OCI" in w for w in result["warnings"])
+    observed = sorted([900/800-1, 800/700-1, 1000/900-1])[1]
+    # Observed book change includes issuance: without payout history it is capped at half the base return.
+    assert result["base"]["book_growth_start"] == pytest.approx(min(observed, max(.03, .5 * result["base"]["roe_start"])))
+    assert any("OCI" in w for w in result["warnings"]) and any("Payout history unavailable" in w for w in result["warnings"])
     data["balance_sheet"] = pd.DataFrame()
     result = F.build(data, selections, context)
     assert result["base"]["book_growth_start"] == .03
@@ -197,12 +203,25 @@ def test_regulatory_shortfall_is_disclosed_not_ignored_or_substituted_for_book()
     assert next(e["value"] for e in result["evidence"] if e["input"] == "reported_regulatory_surplus") == -20
 
 
-def test_all_three_scenarios_use_same_fixed_capital_trajectory():
+def test_scenarios_are_ordered_and_book_growth_is_self_funded():
     data, selections, context = fixture()
     result = F.build(data, selections, context)
     out = [F.project(result[k], 10, .10) for k in ["stress", "base", "upside"]]
     assert out[0]["value"] <= out[1]["value"] <= out[2]["value"]
-    assert [[y["closing_common_equity"] for y in x["ledger"]] for x in out].count([y["closing_common_equity"] for y in out[0]["ledger"]]) == 3
+    for projection in out:  # no automatic owner capital calls: book never grows faster than its return
+        assert projection["funding_required"] <= 1e-9 * projection["value"]
+        assert all(y["book_growth"] <= y["roe"] + 1e-12 for y in projection["ledger"])
+    assert result["stress"]["book_growth_start"] == pytest.approx(.5 * result["base"]["book_growth_start"])
+
+
+def test_owner_funded_growth_cannot_create_value_by_assumption():
+    # The SEZL pattern: 150% book growth at a 69% return fading to the hurdle. With owner-funded growth the value
+    # was ~4x the self-funded value; self-funding caps growth at the return on book.
+    p = dict(common_equity=233.0, roe_start=.69, roe_terminal=.0974, book_growth_start=1.5, terminal_growth=.03)
+    funded = F.project(p, 10, .0974)
+    selfish = F.project({**p, "self_funded": True}, 10, .0974)
+    assert funded["funding_required"] > 10 * p["common_equity"] and selfish["funding_required"] <= 1e-9
+    assert selfish["value"] < funded["value"] / 3
 
 
 def test_builder_monetary_rescaling_preserves_returns_and_projection():
@@ -277,7 +296,7 @@ def test_exact_matched_period_common_earnings_identity_can_establish_factor_one(
     assert estimate["avg"] == pytest.approx((12*184/365+14*181/365)*10)
     unit = next(e for e in estimate["evidence"] if e["input"] == "consensus_unit_reconciliation")
     assert unit["status"] == "verified"
-    assert unit["basis"] == "exact matched-period common-income/weighted-share/EPS identities"
+    assert unit["basis"] == "matched-period common-income/weighted-share/EPS identities within EPS rounding"
 
 
 def test_share_count_or_price_ratio_is_not_evidence_of_economic_rights():

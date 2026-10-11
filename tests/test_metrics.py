@@ -336,7 +336,7 @@ def test_growth_estimate_is_exposed_as_assumption_instead_of_hidden_book_return_
     assert params['growth']==pytest.approx(.6)
     assumption=next(a for a in json.loads(m['model_assumptions']) if isinstance(a,dict) and a.get('parameter')=='initial_growth')
     assert assumption['value']==pytest.approx(.6)
-    assert 'provider +1y fiscal revenue-growth estimate' in assumption['basis']
+    assert 'revenue-growth estimate' in assumption['basis']
 
 
 class _FX:

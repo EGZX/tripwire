@@ -88,7 +88,7 @@ def test_equity_component_cannot_receive_second_debt_bridge():
 
 
 @pytest.mark.parametrize("mutation,expected", [
-    (lambda p: p["components"][1].pop("terminal_growth"), "cross-currency"),
+    (lambda p: p["components"][1].pop("terminal_growth"), "own nominal terminal_growth"),
     (lambda p: p["components"][0].update(fx_to_parent=2.), "same-currency"),
     (lambda p: p["components"][1].update(fx_to_parent=0.), "positive fx"),
     (lambda p: p["components"][1].update(ownership=1.1), "ownership"),
@@ -172,7 +172,8 @@ def test_unattributed_gics_label_is_not_used_as_verified_routing():
     ("Capital Markets", "Financial Services", "financial_other"),
     ("Credit Services", "Financial Services", "financial_other"),
     ("Steel", "Basic Materials", "cyclical"),
-    ("Conglomerates", "Industrials", "hybrid"),
+    ("Conglomerates", "Industrials", "operating"),
+    ("Utilities - Independent Power Producers", "Utilities", "cyclical"),
     ("Multi-Sector Holdings", "Financials", "holdco"),
 ])
 def test_economic_family_routes(industry, sector, family):

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import fetch, metrics, report, resolve, universe, inputs, filings
+from . import fetch, metrics, report, resolve, universe, inputs, filings, policy
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -27,8 +27,9 @@ def load_class_overrides(path: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     for p in (Path(path), Path(path).with_suffix(".local.csv")):
         if p.exists():
-            rows = csv.DictReader(universe.read_text(p).splitlines())
-            out.update({r["yahoo_symbol"].strip(): r["class"].strip() for r in rows if r.get("yahoo_symbol")})
+            lines = [l for l in universe.read_text(p).splitlines() if not l.lstrip().startswith("#")]
+            out.update({r["yahoo_symbol"].strip(): r["class"].strip() for r in csv.DictReader(lines)
+                        if r.get("yahoo_symbol") and r.get("class")})
     return out
 
 
@@ -45,6 +46,11 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = load_config(Path(args.config))
     ic, fc = cfg["inputs"], cfg["fetch"]
+    try:
+        policy.configure(cfg)
+    except ValueError as exc:
+        print(f"CONFIG ERROR: {exc}", flush=True)
+        return 2
     try:
         cfg["issuer_inputs"]=inputs.load(ROOT/ic.get("valuation_overrides","overrides/valuation.toml"))
     except ValueError as exc:

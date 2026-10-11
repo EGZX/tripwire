@@ -50,7 +50,9 @@ def _label_family(sector, industry):
     if "multi-sector holdings" in industry or "holding companies" in industry or "shell companies" in industry:
         return "holdco"
     if "conglomerate" in industry:
-        return "hybrid"
+        return "operating"  # consolidated industrial earnings; not a balance-sheet (bank-style) business
+    if "independent power" in industry or "renewable" in industry:
+        return "cyclical"   # merchant power prices, not an allowed return on a rate base
     if sector == "utilities" or "regulated" in industry:
         return "regulated"
     if industry.startswith(("asset management", "capital markets", "mortgage finance", "credit services")) or sector in {"financial services", "financials"}:
@@ -193,10 +195,11 @@ def _claim_ids(value, location, errors, seen):
         return
     for identity in value:
         identity = identity.strip()
-        if identity in seen:
-            errors.append(f"{location}: duplicate economic claim {identity}; already applied at {seen[identity]}")
+        key = identity.casefold()  # "P:Debt" and "p:debt" are the same claim
+        if key in seen:
+            errors.append(f"{location}: duplicate economic claim {identity}; already applied at {seen[key]}")
         else:
-            seen[identity] = location
+            seen[key] = location
 
 
 def _validate_bridge(bridge, fields, scope, location, errors, seen):
@@ -271,8 +274,9 @@ def validate_sum_of_parts(params: dict) -> list[str]:
             errors.append(f"{loc}: positive fx_to_parent required (parent units per component unit)")
         if component.get("currency") == params.get("currency") and fx != 1:
             errors.append(f"{loc}: same-currency FX must equal one")
-        if component.get("currency") != params.get("currency") and "terminal_growth" not in component:
-            errors.append(f"{loc}: cross-currency component requires its own nominal terminal_growth")
+        if "terminal_growth" not in component:
+            # Each component's perpetuity is its own assumption; a parent/screener setting must not reprice it.
+            errors.append(f"{loc}: component requires its own nominal terminal_growth")
         if not _number(rate) or rate <= -1:
             errors.append(f"{loc}: explicit discount_rate above -100% required")
         if "terminal_growth" in component and (not _number(component["terminal_growth"]) or component["terminal_growth"] <= -1):

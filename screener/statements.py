@@ -5,6 +5,8 @@ import math
 import numpy as np
 import pandas as pd
 
+from .policy import get as policy
+
 ROWS = {
     "revenue": ["Total Revenue", "Operating Revenue"],
     "gross": ["Gross Profit"],
@@ -47,6 +49,10 @@ ROWS.update({
     "net_common_issuance": ["Net Common Stock Issuance"],
     "common_issuance": ["Common Stock Issuance"],
     "common_repurchases": ["Common Stock Payments"],
+    "discontinued_income": ["Net Income Discontinuous Operations"],
+    "unusual": ["Total Unusual Items"],
+    "unusual_tax": ["Tax Effect Of Unusual Items"],
+    "eps_diluted": ["Diluted EPS"],
 })
 
 
@@ -172,6 +178,36 @@ def trailing_checks(ttm, quarters, keys, rounding_unit=0.0) -> list[dict]:
     return checks
 
 
+
+
+def annual_tieout(annual_df, quarters, keys) -> list[dict]:
+    """Four consecutive quarters ending at the latest fiscal year end must add up to the audited annual figure.
+
+    A material gap means restated and unrestated quarters (or different definitions) are mixed, so a TTM built
+    from those quarters cannot be trusted. Only checked when such a quarter window exists."""
+    a_date = statement_date(annual_df) if annual_df is not None and not annual_df.empty else None
+    if a_date is None or quarters is None or quarters.empty:
+        return []
+    dates = [d for d in sorted(set(period_dates(quarters.columns)), reverse=True) if d <= a_date][:4]
+    if len(dates) != 4 or abs((dates[0] - a_date).days) > 7:
+        return []
+    if any(not 84 <= (x - y).days <= 98 for x, y in zip(dates, dates[1:])):
+        return []
+    out = []
+    for key in keys:
+        values, total = row(quarters, key), row(annual_df, key)
+        if values is None or total is None:
+            continue
+        values, annual_value = values.reindex(dates), total.get(a_date, math.nan)
+        if values.isna().any() or not math.isfinite(annual_value):
+            continue
+        summed = math.fsum(values)
+        material = abs(summed - annual_value) > policy().annual_tie_tolerance * max(abs(annual_value), abs(summed))
+        out.append({"field": key, "fiscal_year_end": a_date.date().isoformat(), "annual": float(annual_value),
+                    "quarter_sum": summed, "status": "unreconciled" if material else "ties"})
+    return out
+
+
 def filing_checks(selections: dict[str, "Selection"], evidence: list[dict]) -> list[dict]:
     """Compare sourced facts only with the same period, duration and currency.
 
@@ -198,6 +234,28 @@ def filing_checks(selections: dict[str, "Selection"], evidence: list[dict]) -> l
                 check["status"]="basis_unreconciled"
         results.append(check)
     return results
+
+
+def clean_common_income(df) -> pd.Series:
+    """Common income from continuing operations before after-tax unusual items, per period.
+
+    "Net Income Common Stockholders" includes discontinued operations and one-off items (divestiture gains,
+    warrant revaluations, securities sales). Those are real but cannot be extrapolated as earning power, so
+    margin evidence uses this series. Missing adjustment rows count as zero; a missing income row stays missing.
+    """
+    common = row(df, "net_income")
+    if common is None:
+        return pd.Series(dtype=float)
+    def part(key):
+        s = row(df, key)
+        return s.reindex(common.index).fillna(0.0) if s is not None else 0.0
+    return (common - part("discontinued_income") - (part("unusual") - part("unusual_tax"))).sort_index()
+
+
+def clean_latest(df) -> float:
+    """clean_common_income at this statement's selected date."""
+    s, d = clean_common_income(df), statement_date(df)
+    return float(s.get(d, math.nan)) if d is not None and not s.empty else math.nan
 
 
 def annual(df,key) -> pd.Series:

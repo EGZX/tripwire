@@ -13,6 +13,8 @@ from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from . import policy
+
 PCT = "0.0%"
 PX = "#,##0.00"
 COLUMNS = {  # column -> (header, number format)
@@ -225,7 +227,8 @@ def write(df: pd.DataFrame, resolution: pd.DataFrame, out_dir: Path, history_dir
                                ("Stress discount basis", "same as base"),
                                ("Scenario basis", "Observed company ranges, compatible estimates and dated references; see each model's assumptions"),
                                ("Horizon", f"{v['years']} years"),
-                               ("Rates (10y yield / terminal g)", rates)],
+                               ("Rates (10y yield / terminal g)", rates),
+                               ("Model policy", ", ".join(f"{k} {x:g}" for k, x in policy.describe().items()))],
                      columns=["Item", "Definition"]).to_excel(w, sheet_name="Method", index=False)
         w.sheets["Method"].column_dimensions["A"].width = 24
         w.sheets["Method"].column_dimensions["B"].width = 150

@@ -42,12 +42,13 @@ def test_required_bank_capital_is_funded_separately_from_earnings_growth():
     assert out.cashflows[0]==pytest.approx(.5)
     assert out.terminal_cashflow==pytest.approx(10.5*1.02-110*.02)
 
-def test_reit_maintenance_and_leasing_are_deducted_once_from_common_ffo():
-    p=dict(ffo_common=100,recurring_capex=20,leasing_costs=10,growth=0,return_on_new_equity=.12)
+def test_reit_straight_line_rent_maintenance_and_leasing_are_deducted_once_from_common_ffo():
+    p=dict(ffo_common=100,straight_line_rent=5,recurring_capex=20,leasing_costs=10,growth=0,return_on_new_equity=.12)
     out=M.reit(p,10,.1,0)
-    assert out.claim=='equity' and out.value==pytest.approx(700)
-    del p['recurring_capex']
-    with pytest.raises(V.InvalidModel,match='recurring_capex'):M.reit(p,10,.1,0)
+    assert out.claim=='equity' and out.value==pytest.approx((100-5-20-10)/.1)  # AFFO 65 as a level perpetuity
+    for required in ('straight_line_rent','recurring_capex'):
+        q={k:v for k,v in p.items() if k!=required}
+        with pytest.raises(V.InvalidModel,match=required):M.reit(q,10,.1,0)
 
 def test_regulated_lag_pipeline_is_cleared_before_terminal_value():
     p=dict(rate_base=100,rate_base_history=[100,100,100],growth=.4,earned_after_tax_return=.1,regulatory_lag_years=2,funding_capacity=30)
@@ -112,7 +113,7 @@ def test_mortgage_reit_cannot_inherit_property_ffo_math():
     m=run(d)
     assert m['model_family']=='mortgage_reit' and m['model']=='equity_residual_income'
     assert m['not_rankable']=='' and m['implied_return_claim']=='equity'
-    p=dict(ffo_common=100,recurring_capex=20,leasing_costs=10,growth=0,return_on_new_equity=.12)
+    p=dict(ffo_common=100,straight_line_rent=0,recurring_capex=20,leasing_costs=10,growth=0,return_on_new_equity=.12)
     m=run(d,{**CFG,'issuer_inputs':{'TEST':issuer('reit_affo',p)}})
     assert 'model does not match issuer economics' in m['not_rankable']
 

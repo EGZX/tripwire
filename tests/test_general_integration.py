@@ -12,8 +12,11 @@ from test_metrics import CFG, operating
 
 
 class DatedFX:
+    def __init__(self,rates=None):
+        self.rates=rates or {}
+
     def rate(self,a,b):
-        return 1.0
+        return self.rates.get((a,b),1.0)
 
     def observations(self):
         return {a+'/'+b:{'rate':1.,'as_of':'2026-10-09T15:00:00+00:00','source':'controlled FX'}
@@ -35,8 +38,8 @@ def issuer(industry='Software - Application',sector='Technology'):
     return data
 
 
-def compute(data,cfg=None):
-    return metrics.compute(data,None,DatedFX(),cfg or config(),None,valuation_date=date(2026,10,11))
+def compute(data,cfg=None,fx=None):
+    return metrics.compute(data,None,fx or DatedFX(),cfg or config(),None,valuation_date=date(2026,10,11))
 
 
 def candidate(result,cfg=None):
@@ -61,7 +64,10 @@ def test_prerevenue_assets_are_partial_recovery_scenarios_not_invented_project_p
         data[key].loc['Net Income Common Stockholders']=-10.
     result=compute(data)
     assert result['model']=='asset_recovery' and result['not_rankable']==''
-    assert result['value_reasonable']==pytest.approx(600.)
+    # Base: cash at par, other assets at half (orderly liquidation), less claims; upside: full book (600).
+    assets,cash,book=900.,50.,600.
+    assert result['value_reasonable']==pytest.approx(cash+.5*(assets-cash)-(assets-book))
+    assert result['value_upside']==pytest.approx(book)
     assert result['value_adverse']==0.
     assert 'unvalued operating or project assets' in result['flags']
     assert not candidate(result)
@@ -81,7 +87,8 @@ def test_sum_of_parts_through_issuer_schema_preserves_common_claim_and_parent_br
     from test_business_models import parts
     p=parts();cfg=config()
     cfg['issuer_inputs']={'TEST':evidence(model='sum_of_parts',base=p,stress=deepcopy(p))}
-    result=compute(issuer('Conglomerates','Industrials'),cfg)
+    # The component declares EUR->USD at 2.0; the market rate agrees, so the FX plausibility check passes.
+    result=compute(issuer('Conglomerates','Industrials'),cfg,fx=DatedFX({('EUR','USD'):2.0}))
     assert result['not_rankable']=='' and result['value_reasonable']==pytest.approx(233.)
     assert result['implied_return_claim']=='equity'
     assert json.loads(result['base_parent_bridge'])['application_count']==1

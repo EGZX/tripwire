@@ -123,12 +123,13 @@ def reit(p:dict, years:int, rate:float, gt:float) -> Projection:
     """Common-equity AFFO distributions with explicit growth-equity reinvestment.
 
     Input FFO must be attributable to common holders, after financing expenses.
-    Recurring property capex and leasing costs are deductions, not optional zeros.
+    Straight-line rent (noncash), recurring property capex and leasing costs are deductions, not optional zeros;
+    the same bridge as the automatic FFO-to-AFFO path.
     """
-    ffo,capex,leasing,growth,return_new=_require(p,"ffo_common","recurring_capex","leasing_costs","growth","return_on_new_equity")
+    ffo,straight_line,capex,leasing,growth,return_new=_require(p,"ffo_common","straight_line_rent","recurring_capex","leasing_costs","growth","return_on_new_equity")
     if min(capex,leasing)<0:
         raise V.InvalidModel("property maintenance and leasing costs must be nonnegative")
-    affo=ffo-capex-leasing
+    affo=ffo-straight_line-capex-leasing
     _positive(affo=affo)
     ds,term=V.distributions(affo,growth,gt,years,return_new,p.get("terminal_return",return_new))
     if term<=0:raise V.InvalidModel("REIT terminal distributions are not positive; use asset NAV")

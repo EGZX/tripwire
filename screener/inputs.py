@@ -21,7 +21,8 @@ PARAMETERS={"source","revenue","growth","margin_start","margin_terminal","tax_ra
             "rate_base","rate_base_history","earned_after_tax_return","regulatory_lag_years","attributable_assets","parent_debt",
             "other_claims","tax_leakage","holding_cost_pv","cashflows","salvage_value","closure_cost",
             "discount_rate","terminal_growth","common_equity","roe_start","roe_terminal","book_growth_start",
-            "roe_path","book_growth_path","earnings_basis","equity_to_sales","terminal_equity_return","total_assets","asset_recovery_value"}
+            "roe_path","book_growth_path","earnings_basis","equity_to_sales","terminal_equity_return","total_assets","asset_recovery_value",
+            "growth_path","self_funded","straight_line_rent","terminal_incremental_return"}
 
 def validate_issuer(symbol:str,p:dict, evaluation_date:date|None=None) -> list[str]:
     errors=[]
@@ -126,7 +127,7 @@ def validate_issuer(symbol:str,p:dict, evaluation_date:date|None=None) -> list[s
             continue
         for k,v in p[case].items():
             if k not in PARAMETERS:errors.append(f"{symbol}.{case}: unknown parameter {k}")
-            if k not in ("source","release_terminal_excess","excess_income_excluded","cashflows","rate_base_history","roe_path","book_growth_path","earnings_basis") and (isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v)):
+            if k not in ("source","release_terminal_excess","excess_income_excluded","cashflows","rate_base_history","roe_path","book_growth_path","earnings_basis","growth_path","self_funded") and (isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v)):
                 errors.append(f"{symbol}.{case}.{k}: must be finite numeric")
             if k in ("release_terminal_excess","excess_income_excluded") and not isinstance(v,bool):
                 errors.append(f"{symbol}.{case}.{k}: must be boolean")

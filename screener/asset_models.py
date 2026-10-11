@@ -21,6 +21,7 @@ from typing import Any
 import pandas as pd
 
 from . import financial_models as F, statements as S, valuation as V
+from .policy import get as policy
 
 
 def _number(value: Any) -> bool:
@@ -387,12 +388,13 @@ def build_recovery(data, selections, context):
     F.add_dependencies(dependencies,'balance',_book_dependencies(label)|{'assets','cash'},period,selections['balance'].source)
     return {'model':'asset_recovery','claim':'equity','family':context.get('family'),
         'quality':'partial balance-sheet recovery scenarios; operating/project option value unquantified',
-        'base':{**params,'asset_recovery_value':assets},
+        # Orderly liquidation: cash at par, other assets at the policy share of carrying value (book is the upside case).
+        'base':{**params,'asset_recovery_value':recoverable+policy().recovery_noncash_share*max(0.,assets-recoverable)},
         'stress':{**params,'asset_recovery_value':recoverable},
         'upside':{**params,'asset_recovery_value':assets},
         **F.dependency_contract(dependencies),
         'evidence':[{'field':'book_equity','value':book,'source':label},{'field':'assets','value':assets,'source':selections['balance'].source}],
-        'assumptions':['Base: reported asset carrying amounts are recoverable and reported claims settle at carrying amounts.',
+        'assumptions':[f'Base: cash recovers at par and other assets at {policy().recovery_noncash_share:.0%} of their carrying amount (orderly liquidation); reported claims settle at carrying amounts. Upside: full carrying amounts.',
             'Stress: only disclosed cash-like assets recover; zero recovery is a stress hypothesis when cash is unobserved, not a fact that cash is zero.',
             'No additional liquidation tax/cost or off-balance claim is estimated. These hypotheses need refinement before investment use.',
             'The highest quantified scenario is not an upper bound: mineral rights, development projects, recovery options and future operations are not valued.'],

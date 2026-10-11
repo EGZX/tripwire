@@ -209,6 +209,6 @@ def test_same_period_sourced_debt_can_complete_a_missing_provider_row():
 
 def test_new_provenance_flags_prevent_candidate_status():
     cfg={'scoring':{'w_value':.4,'w_quality':.3,'w_growth':.2,'w_balance':.1}}
-    for flag in ('quote refresh failed','quote date unavailable','stale cache fallback','short-window cycle proxy'):
+    for flag in ('quote refresh failed','quote date unavailable','stale cache fallback','holding company valued on consolidated book'):
         result=scoring.score(pd.DataFrame([{'class':'operating','entry_score':20,'flags':flag,'not_rankable':''}]),cfg)
         assert result.iloc[0]['status']=='data flag' and not result.iloc[0]['candidate']

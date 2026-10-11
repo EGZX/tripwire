@@ -1,11 +1,4 @@
 yahoo_symbol,class,note
-V,operating,Yahoo lists Visa under Credit Services - asset-light network
-MA,operating,Yahoo lists Mastercard under Credit Services - asset-light network
-BN,holdco,Holding company - value via NAV / distributable earnings
-PRX.AS,holdco,Prosus - holding company (Tencent stake)
-KSPI,financial,Kaspi - bank + marketplace; customer deposits distort FCF and EV
-MELI,financial,MercadoLibre - Mercado Pago credit/deposit flows distort FCF
-ADYEN.AS,financial,Adyen - merchant funds inflate cash and OCF
-WISE.L,financial,Wise - customer balances inflate cash and OCF
-ENX.PA,financial,Euronext - clearing-house (CCP) cash distorts EV
-IREN,operating,Yahoo lists IREN under Capital Markets - it is a data-centre operator
+# Issuer rows go in classification.local.csv (git-ignored; local rows win). Use one only when the provider
+# label misstates the economics; labels that already route correctly need no row. Example:
+# EXAMPLE,operating,Provider lists a data-centre operator under Capital Markets

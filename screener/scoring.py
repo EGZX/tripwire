@@ -23,14 +23,17 @@ FINANCIAL = {
 }
 PILLARS = ["value", "quality", "growth", "balance"]
 SCORED = ("operating", "cyclical", "financial", "asset")
-CRITICAL_FLAGS = ("stale financials", "no market cap", "check one-offs", "thin capital",
+# Flags that block candidate status: the price, the units or the valuation inputs cannot be trusted. Purely
+# informational flags (country proxy, priced capital calls, limited-liability endpoint, FX used) do not block.
+CRITICAL_FLAGS = ("stale financials", "no market cap",
                   "quote date unavailable", "quote refresh failed", "stale cache fallback",
-                  "country exposure unavailable", "short-window cycle proxy", "stale or future quote",
+                  "stale or future quote",
                   "stale or future rates", "rate date unavailable", "filing verification unavailable")
 CRITICAL_FLAGS += ("stale or future FX","FX date unavailable")
 CRITICAL_FLAGS += ("TTM/quarterly inputs unreconciled", "lease/cash-flow basis unreconciled")
 CRITICAL_FLAGS += ("unresolved minor-unit market capitalization", "market-cap override does not match", "unresolved ownership scope")
 CRITICAL_FLAGS += ('unvalued operating or project assets','capitalization estimated from quote and shares')
+CRITICAL_FLAGS += ('holding company valued on consolidated book',)
 
 
 def percentiles(df: pd.DataFrame, spec: dict, weights: dict) -> pd.DataFrame:

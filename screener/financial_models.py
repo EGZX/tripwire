@@ -16,6 +16,7 @@ from statistics import median
 import pandas as pd
 
 from . import statements as S, valuation as V
+from .policy import get as policy
 
 MODEL = "equity_residual_income"
 
@@ -54,6 +55,10 @@ def project(p: dict, years: int, rate: float, gt: float | None = None) -> dict:
 
     roes = path("roe_path", roe0, roe_t)
     growths = path("book_growth_path", growth0, terminal_growth)
+    if p.get("self_funded"):
+        # Book can only grow as fast as earnings allow: no automatic capital calls from owners, so owner-funded
+        # expansion at above-hurdle returns cannot create value by assumption.
+        growths = [min(g, r) for g, r in zip(growths, roes)]
     if min(growths) <= -1:
         raise V.InvalidModel("projected common book equity cannot be exhausted or negative")
     opening = book
@@ -75,12 +80,22 @@ def project(p: dict, years: int, rate: float, gt: float | None = None) -> dict:
         flows.append(distribution)
         residual_income.append(residual)
         book = closing
-    terminal = (roe_t - terminal_growth) * book
+    # Mature phase: the existing book keeps earning roe_t; capital added for terminal growth earns
+    # terminal_incremental_return. Default roe_t (all book earns roe_t, the declared-model convention); the
+    # automatic builder sets the hurdle, so growth adds no value at maturity as in the operating model.
+    incremental = p.get("terminal_incremental_return", roe_t)
+    if terminal_growth > 0 and incremental < terminal_growth:
+        raise V.InvalidModel("terminal incremental return cannot fund permanent book growth")
+    terminal = roe_t * book * (1 - terminal_growth / incremental) if incremental else 0.0
     value = V.discount(flows, terminal, rate, terminal_growth)
     terminal_value = terminal / (rate - terminal_growth) if terminal else 0.0
-    # Independent telescoping identity, retaining the terminal book deduction.
     residual_value = opening + math.fsum(x / (1 + rate) ** t for t, x in enumerate(residual_income, 1))
-    residual_value += (terminal_value - book) / (1 + rate) ** years
+    if math.isclose(incremental, rate) and rate > terminal_growth + 1e-12 and terminal:
+        # Independent closed form: with new capital earning the hurdle, residual income is a level perpetuity
+        # (roe_t - r) * B_N from year N+1 on. Algebraically equal to the dividend path, computed separately.
+        residual_value += (roe_t - rate) * book / rate / (1 + rate) ** years
+    else:
+        residual_value += (terminal_value - book) / (1 + rate) ** years
     scale = max(abs(opening), abs(value), abs(residual_value))
     if abs(value - residual_value) > 1e-10 * scale:
         raise V.InvalidModel("common-equity distributions do not reconcile to residual income")
@@ -185,6 +200,19 @@ def _same_arithmetic(a, b) -> bool:
     return _number(a) and _number(b) and abs(a-b) <= 4 * math.ulp(max(abs(a), abs(b)))
 
 
+def _same_eps(a, b) -> bool:
+    """Reported EPS figures agree within cent rounding (half a cent) or 0.5%.
+
+    Tight enough to separate GAAP from adjusted consensus bases, which typically differ by several percent."""
+    return _number(a) and _number(b) and abs(a - b) <= max(0.006, 0.005 * max(abs(a), abs(b)))
+
+
+def _eps_ties(eps, shares, income) -> bool:
+    """EPS x weighted shares reproduces common income up to EPS rounding (half a cent per share) plus 0.5%."""
+    return (_number(eps) and _number(shares) and _number(income)
+            and abs(eps * shares - income) <= 0.006 * abs(shares) + 0.005 * abs(income))
+
+
 def _eps_unit_ratio(data, selections, estimates, annual_date, shares, share_selection,
                     share_label, periods, evidence, warnings):
     """Prove estimate EPS units before multiplying by statement share counts.
@@ -286,14 +314,14 @@ def _eps_unit_ratio(data, selections, estimates, annual_date, shares, share_sele
     observed = (annual_eps, annual_shares, annual_income, current_eps, current_income, reference_eps)
     if not all(_number(x) for x in observed) or annual_shares <= 0 or annual_eps == 0 or current_eps == 0:
         return reject("reported annual/current common EPS and weighted-share evidence is incomplete")
-    if not (_same_arithmetic(annual_eps, reference_eps)
-            and _same_arithmetic(annual_eps * annual_shares, annual_income)
-            and _same_arithmetic(current_eps * shares, current_income)):
-        return reject("reported common earnings, EPS and estimate reference do not tie exactly; no share ratio or rounding is inferred")
+    if not _same_eps(annual_eps, reference_eps):
+        return reject("estimate year-ago EPS differs from reported EPS: the consensus is on another (e.g. adjusted) basis")
+    if not (_eps_ties(annual_eps, annual_shares, annual_income) and _eps_ties(current_eps, shares, current_income)):
+        return reject("reported common earnings, EPS and weighted shares do not tie within EPS rounding; no share ratio is inferred")
     if "+1y" in periods:
-        if "avg" not in estimates.columns or not _same_arithmetic(estimates.loc["+1y", "yearAgoEps"], estimates.loc["0y", "avg"]):
+        if "avg" not in estimates.columns or not _same_eps(estimates.loc["+1y", "yearAgoEps"], estimates.loc["0y", "avg"]):
             return reject("next-year EPS reference is not on the same current-year estimate basis")
-    record.update(status="verified", basis="exact matched-period common-income/weighted-share/EPS identities",
+    record.update(status="verified", basis="matched-period common-income/weighted-share/EPS identities within EPS rounding",
                   annual_period_end=annual_date.date().isoformat(), annual_common_income=float(annual_income),
                   annual_weighted_shares=float(annual_shares), annual_eps=float(annual_eps),
                   estimate_year_ago_eps=float(reference_eps), current_common_income=float(current_income),
@@ -313,6 +341,21 @@ def _estimate(data, selections, current, evidence, assumptions, warnings) -> dic
     shares = S.latest(income.frame, "shares_avg")
     share_basis = "selected income statement diluted/basic weighted-average common shares"
     share_selection, share_label = income, S.latest_label(income.frame, "shares_avg")
+    if not _number(shares) or shares <= 0:
+        # A four-quarter TTM carries no weighted shares (they are not additive): use the latest quarter, whose own
+        # EPS and income then form the current identity.
+        q = data.get("quarterly_income_stmt")
+        if isinstance(q, pd.DataFrame) and not q.empty:
+            try:
+                q_date = S.statement_date(q)
+            except (TypeError, ValueError):
+                q_date = None
+            if q_date is not None and income.date is not None and abs((q_date - income.date).days) <= 45:
+                q_sel = S.Selection(q, "quarterly_income_stmt", q_date, q_date, ())
+                q_shares = S.latest(q, "shares_avg")
+                if _number(q_shares) and q_shares > 0:
+                    shares, share_selection, share_label = q_shares, q_sel, S.latest_label(q, "shares_avg")
+                    share_basis = "latest-quarter diluted/basic weighted-average common shares"
     if not _number(shares) or shares <= 0:
         shares = S.latest(balance.frame, "shares_out")
         share_basis = "selected balance-sheet ordinary shares"
@@ -429,7 +472,8 @@ def build(data: dict, selections: dict[str, S.Selection], context: dict) -> dict
                 dict(input="current_common_income", value=common_income, source=income.source,
                      period_end=income.date.date().isoformat(), field=S.latest_label(income.frame, "net_income"))]
     assumptions = ["Forecast common equity follows clean surplus: earnings less net owner distributions equals the change in book equity.",
-                   "Terminal common return equals the build-time equity hurdle (competitive equilibrium); it remains fixed when the same cash flows are re-discounted.",
+                   "Mature return on existing book: hurdle plus half of today's excess return (at most 5 points; stress: hurdle). Capital added for terminal growth earns the hurdle, so growth itself adds no value at maturity.",
+                   "Book growth is self-funded: it cannot exceed the return on book, so no owner capital calls are assumed.",
                    "Base, stress and upside share one capital trajectory; only evidenced starting earning power varies, so lower profitability is paid for through lower distributions or capital calls.",
                    "Future OCI, noncash share issuance and accounting revaluations are zero in the projection; historical discrepancies are disclosed rather than forced into earnings."]
     warnings = ["Book common equity is not regulatory capital; regulatory buffers, transfer restrictions and credit/catastrophe stress are not identified by this accounting model."]
@@ -500,20 +544,54 @@ def build(data: dict, selections: dict[str, S.Selection], context: dict) -> dict
     evidence.extend(estimate["evidence"])
     assumptions.extend(estimate["assumptions"])
     warnings.extend(estimate["warnings"])
-    base_roe = estimate["avg"] / book
+    # Base return on AVERAGE book over the trailing year (earnings accrue on the opening as well as the closing
+    # book), from clean income (continuing operations before after-tax unusual items) unless consensus is used.
+    opening_book = math.nan
+    for frame_name in ("quarterly_balance_sheet", "balance_sheet"):
+        series = S.row(data.get(frame_name), "common_equity")
+        if series is None or balance.date is None:
+            continue
+        near = [d for d in series.index if abs((d - (balance.date - pd.DateOffset(years=1))).days) <= 60 and _number(series[d])]
+        if near:
+            opening_book = float(series[min(near, key=lambda d: abs((d - (balance.date - pd.DateOffset(years=1))).days))])
+            break
+    average_book = (opening_book + book) / 2 if _number(opening_book) and opening_book > 0 else book
+    earnings = estimate["avg"]
+    if estimate.get("basis") != "annual EPS consensus interpolated to next twelve months":
+        clean = S.clean_latest(income.frame)
+        if _number(clean):
+            earnings = clean
+    base_roe = earnings / average_book
+    evidence.append(dict(input="base_return_on_average_book", value=base_roe, earnings=earnings, opening_book=opening_book,
+                         closing_book=book, basis="clean common income / average common book" if earnings is not estimate["avg"] else estimate["basis"]))
     candidates = [base_roe, common_income / book, *returns]
     if "low" in estimate:
         candidates.append(estimate["low"] / book)
     if "high" in estimate:
         candidates.append(estimate["high"] / book)
-    starts = {"base": base_roe, "stress": min(candidates), "upside": max(candidates)}
-    assumptions.append("Stress/upside starting returns span observed annual/current returns and available analyst low/high estimates; they are scenarios, not probability quantiles or guaranteed bounds.")
+    pol = policy()
+    # Stress is a real downside (credit/catastrophe year): below base by the policy factor, with reduced book growth.
+    stress_roe = min(min(candidates), pol.stress_return_factor * base_roe) if base_roe > 0 else min(candidates)
+    starts = {"base": base_roe, "stress": stress_roe, "upside": max(candidates)}
+    assumptions.append(f"Stress starts at the lower of the worst observed/estimated return and {pol.stress_return_factor:.0%} of base, with {pol.stress_growth_factor:.0%} of the base book growth; upside spans observed returns and analyst high estimates. Scenarios, not probability quantiles or guaranteed bounds.")
+    excess = lambda roe: max(0.0, roe - rate)
+    # A durable franchise keeps part of today's excess return, capped over the hurdle (policy franchise share/cap).
+    # Stress assumes it is competed away entirely.
+    terminals = {"base": rate + min(pol.franchise_share * excess(base_roe), pol.franchise_cap), "stress": rate,
+                 "upside": rate + min(pol.upside_franchise_share * excess(starts["upside"]), pol.upside_franchise_cap)}
+    if not retained_growth and book_growth:
+        # Observed book change includes share issuance; without payout evidence retention is unknown, so start at
+        # most at the policy retention share of the base return.
+        if growth > pol.unknown_payout_retention * base_roe:
+            growth = max(gt, pol.unknown_payout_retention * base_roe)
+            warnings.append(f"Payout history unavailable: starting book growth limited to {pol.unknown_payout_retention:.0%} of the base return on book (issuance excluded).")
+    growths = {"base": growth, "stress": pol.stress_growth_factor * growth if growth > gt else growth, "upside": growth}
     if not returns:
         warnings.append("No annual earnings matched to positive opening common book; empirical return scenarios have limited history.")
     plans = {}
     for name, initial_return in starts.items():
-        params = dict(common_equity=book, roe_start=float(initial_return), roe_terminal=rate,
-                      book_growth_start=growth, terminal_growth=gt,
+        params = dict(common_equity=book, roe_start=float(initial_return), roe_terminal=terminals[name],
+                      book_growth_start=growths[name], terminal_growth=gt, self_funded=True, terminal_incremental_return=rate,
                       earnings_basis=estimate["basis"] if name == "base" else "empirical earnings scenario")
         projected = project(params, years, rate, gt)
         if projected["funding_required"] > 0:

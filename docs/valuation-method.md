@@ -58,6 +58,15 @@ It does not subtract debt, cash, preferred claims or leases a second time. This
 avoids combining expensed operating leases with another full lease-debt deduction.
 It does not imply that financing or lease economics are known perfectly.
 
+Earnings are clean common income: common income less discontinued operations and
+less unusual items after their tax effect. A divestiture gain or a one-off
+write-up therefore cannot become a mature margin. Clean margins above the policy
+margin limit (default: 100% of revenue) are treated as one-offs on a tiny revenue
+base and excluded; losses of any size are kept. Own history sets the terminal
+margin only on a mostly profitable record (at least two positive periods and at
+least half of them); otherwise the dated industry reference applies. Cyclicals
+start part of the way from the current towards the historical median margin.
+
 Existing explicit firm forecasts, regulatory-capital distributions, property AFFO,
 regulated rate-base, NAV and finite-project models remain available for better
 issuer evidence. Firm models require a complete firm-to-common bridge and a
@@ -76,6 +85,16 @@ The financial/common-equity kernel uses:
 - earnings = opening common book equity x scenario return;
 - net owner distribution = earnings - change in common equity;
 - value = discounted distributions plus the stated terminal franchise value.
+
+The base return is clean common income over average common book of the trailing
+year (or the interpolated EPS consensus when its units reconcile). Automatic
+plans are self-funded: book growth cannot exceed the return on book, so no owner
+capital call is assumed. At maturity the existing book keeps the hurdle plus a
+share of today's excess return, capped (policy franchise share and cap; stress:
+the hurdle). Capital added for terminal growth earns the hurdle, so growth adds no
+value at maturity. Stress starts at most at a fixed fraction of the base return,
+with reduced book growth; without payout history, starting book growth is
+limited to a retention share of the base return.
 
 It independently checks the equivalent residual-income identity. Common book
 capital is not represented as regulatory capital. Missing regulatory forecasts
@@ -96,6 +115,16 @@ The displayed -100 score at a zero ceiling is the limiting display endpoint;
 the ratio itself is not fabricated as a finite raw score.
 
 ## International estimates and industry references
+
+Revenue-growth estimates are used only when the provider's base-year revenue
+reconciles to the last fiscal year or the TTM within the policy tolerance;
+otherwise the period or revenue definition differs and observed growth applies.
+Estimates in another currency than the statements (ADRs) use the provider's
+growth rate, which is currency-neutral. Next-twelve-month growth weights the
+current and next fiscal-year estimates by the share of the fiscal year still
+ahead. After the two estimate years, excess growth over terminal growth halves
+every policy half-life (default two years); one estimate is never compounded for
+a decade.
 
 Annual EPS estimates need fiscal-period, currency and economic share-unit
 reconciliation. Same currency alone is insufficient for an ADR or another class.
@@ -141,6 +170,24 @@ satisfied. The output states this distinction. Source-labeled segment metadata
 can coexist with a consolidated model when segment forecasts are not supplied;
 that coverage limitation stays visible.
 
+## Model policy
+
+Every judgement threshold of the automatic models lives in `screener/policy.py`:
+margin limit, cyclical normalisation, growth half-life, estimate tolerance,
+minimum reference sample, franchise share and cap, stress factors, payout
+retention, asset-recovery share and the data-control materialities. They contain
+no ticker, country or sector exceptions, so they apply unchanged to every issuer
+added later. Each can be set in `config.toml` under `[model_policy]`; unknown keys
+or negative values stop the run, and the Method sheet lists the values used.
+Discount rates, the equity risk premium and terminal growth stay in
+`[valuation]` and `[rates]`.
+
+Provider labels route automatically (`business_models`). Per-ticker rows in
+`overrides/classification.local.csv` (git-ignored) are only for issuers whose provider label
+misstates their economics; they are not needed when the label already routes
+correctly. A new provider industry needs at most one line in the industry
+crosswalk, and a test checks every crosswalk target exists in the reference.
+
 ## Ranking and controls
 
 A stock can have a conditional valuation without qualifying as a candidate.
@@ -149,6 +196,16 @@ can still prevent valuation. Stale quotes, unresolved quote units, unverified
 ownership/capitalization and partial asset coverage can block candidate status
 while preserving a numeric comparison. Missing a sector-specific manual forecast
 is no longer a blanket blocker.
+
+Data flags are either blocking or informational. Blocking flags describe a data
+problem that can change the value: stale or future quotes, stale financials,
+unresolved ownership scope (a material common-vs-consolidated income gap with
+more units than listed shares), quarters that do not add up to the audited annual
+figure, declared FX far from the market rate, and holding companies valued on
+consolidated book without a NAV or sum-of-parts. Provider-country proxies,
+currency conversion and modeled owner contributions are disclosed but do not
+block. Small differences (share classes, rounding) are below materiality and are
+not flagged.
 
 The inspector and exports show the chosen model, selection reason, scenario
 range, assumptions, uncertainties and modeled capital contributions. Old growth

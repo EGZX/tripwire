@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import math
 
+from .policy import get as policy
+
 # Identity tolerance for serialized/rounded provider arithmetic (one part/million).
 IDENTITY_RTOL = 1e-6
 
@@ -60,6 +62,9 @@ def capitalization(info: dict, divisor: float, supplied: dict) -> tuple[float,li
             errors.append("unresolved minor-unit market capitalization: dated share reconciliation required")
     return float(cap),flags,errors
 
+# Materiality thresholds: screener/policy.py (ownership_income_materiality, ownership_unit_materiality).
+
+
 def ownership_check(info: dict, common_income: float, consolidated_income: float,
                     supplied: dict) -> str | None:
     """Detect cases requiring an economic share-class/partnership reconciliation.
@@ -75,7 +80,9 @@ def ownership_check(info: dict, common_income: float, consolidated_income: float
                 return "unresolved ownership scope: current aggregate shares no longer match the sourced common-share reconciliation"
         return None
     common,aggregate=info.get("sharesOutstanding"),info.get("impliedSharesOutstanding")
-    if all(number(x) and x>0 for x in (common,aggregate)) and aggregate>common and not math.isclose(common,aggregate,rel_tol=IDENTITY_RTOL):
-        if all(number(x) for x in (common_income,consolidated_income)) and not math.isclose(common_income,consolidated_income,rel_tol=IDENTITY_RTOL):
+    if all(number(x) and x>0 for x in (common,aggregate)) and aggregate>policy().ownership_unit_materiality*common:
+        # Materiality, not identity: a 0.03% preferred/rounding difference (dual share classes, small preferred dividends) is not evidence that the
+        # listed company owns only part of the earnings; a large gap (a listed class holding a minority of the operating partnership) is.
+        if all(number(x) for x in (common_income,consolidated_income)) and not math.isclose(common_income,consolidated_income,rel_tol=policy().ownership_income_materiality):
             return "unresolved ownership scope: multiple share classes or partnership units require economic-rights reconciliation"
     return None

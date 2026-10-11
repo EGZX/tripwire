@@ -17,6 +17,7 @@ from .fetch import FX, major_currency
 from . import statements as S, market, models, automatic, evidence_assembly, business_models
 from .inputs import validate_issuer
 from .checks import policy_rates
+from .policy import get as policy
 
 from .statements import ROWS, row as _row, latest as _latest, annual as _annual, finite_series as _finite, statement_date as _date
 
@@ -104,8 +105,26 @@ def _finish_values(m, reasonable, stress, mcap, flags, policy_ceiling=None):
     return m
 
 
-def _explicit_model(m,supplied,vcfg,bridge,mcap,flags,blockers):
+
+
+def _component_fx_errors(params,fx):
+    """Declared fx_to_parent (parent units per component unit) against today's market rate."""
+    errors=[]
+    for comp in params.get("components",[]) if isinstance(params,dict) else []:
+        ccy,parent,declared=comp.get("currency"),params.get("currency"),comp.get("fx_to_parent")
+        if not (fx and isinstance(ccy,str) and isinstance(parent,str) and ccy!=parent and _isnum(declared) and declared>0):continue
+        try:market=fx.rate(ccy,parent)
+        except Exception:market=None
+        if market and abs(declared/market-1)>policy().fx_plausibility:
+            errors.append(f"component {comp.get('id','?')}: fx_to_parent {declared:.4g} vs market {ccy}->{parent} {market:.4g}; inverted or stale")
+    return errors
+
+
+def _explicit_model(m,supplied,vcfg,bridge,mcap,flags,blockers,fx=None):
     name=supplied["model"]
+    if name=="sum_of_parts":
+        for case in ("base","stress","upside"):
+            blockers.extend(_component_fx_errors(supplied.get(case),fx))
     permitted={"bank":{"bank_capital"},"insurer":{"insurer_capital"},"reit":{"reit_affo","asset_nav"},"mortgage_reit":{"asset_nav"},
                "regulated":{"regulated_rate_base","operating_forecast"},"holdco":{"asset_nav"},
                "hybrid":{"asset_nav"},"financial_other":{"financial_capital","operating_forecast","asset_nav"},
@@ -159,6 +178,8 @@ def _explicit_model(m,supplied,vcfg,bridge,mcap,flags,blockers):
              assumptions_as_of=str(supplied.get("as_of","")),implied_growth_status="not applicable to driver model",
              implied_return_status="not computed for explicit driver model")
     if m["class"] in ("holdco","preprofit"):m["class"]="asset"
+    if name=="asset_recovery":  # same gate as the automatic path: a partial recovery estimate is not a full valuation
+        flags.append("unvalued operating or project assets; partial recovery estimate only")
     if blockers:
         m["not_rankable"]="; ".join(dict.fromkeys(blockers));m["flags"]="; ".join(flags);return m
     return _finish_values(m,*outputs,mcap,flags,policy_ceiling=policy_ceiling)
@@ -368,8 +389,14 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
         if selection.source.startswith("ttm_"):
             reconciliation.extend({"statement":name,**c} for c in S.trailing_checks(selection.frame,quarterly,keys,rounding))
     m["ttm_reconciliation"] = json.dumps(reconciliation,sort_keys=True)
+    annual_ties = S.annual_tieout(data.get("income_stmt"), data.get("quarterly_income_stmt"),
+                                  ("net_income",) if cls=="financial" else ("revenue","net_income"))
+    m["annual_tieout"] = json.dumps(annual_ties,sort_keys=True)
     if not is_automatic and any(c["status"]=="unreconciled" for c in reconciliation):
         flags.append("TTM/quarterly inputs unreconciled: rounding or accounting basis needs verification")
+    elif any(c["status"]=="unreconciled" for c in annual_ties):
+        # Applies to automatic issuers too: their TTM is built from these quarters.
+        flags.append("TTM/quarterly inputs unreconciled: quarters do not add up to the audited annual figure")
     checks=S.filing_checks(selections,supplied.get("filing_checks",[]))
     m["filing_reconciliation"]=json.dumps(checks,sort_keys=True)
     for check in checks:
@@ -516,7 +543,7 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
     m["evs_vs_hist"] = (_evs_vs_history(data, mcap, price_now or info_price, a_rev, ab, ai, m["evs"])
                         if cls in ("operating", "cyclical") else math.nan)
     if supplied.get("model"):
-        return _explicit_model(m,supplied,vcfg,net_debt+minority+preferred+other_claims,mcap,flags,blockers)
+        return _explicit_model(m,supplied,vcfg,net_debt+minority+preferred+other_claims,mcap,flags,blockers,fx)
     # Model-specific input requirements belong to the selected model, not to a
     # generic firm bridge or a sector label. Context metrics remain descriptive.
     m.update(earnings_yield=ni/mcap if _isnum(ni) else math.nan,

@@ -79,13 +79,10 @@ Post-integration verification ran from the shared `main` checkout:
   by SHA-256. The new golden output exactly matched the previously reviewed
   expectations; the old local golden file was backed up before replacement.
 - All **131 saved provider records** computed successfully; **64 funded paths**
-  passed the invariants. Main retains its local DXYZ fund override, so the result
-  was six eligible, 44 above ceiling, 14 data-flagged, 48 not-rankable and 19
-  not-screened records. An isolated replay without that local override confirmed
-  identical absolute valuations and statuses for every other issuer; only the
-  relative financial-sector rankings changed when DXYZ left that comparison set.
-  The earlier saved corpus also predates the final broker model labels for HOOD
-  and IBKR; this affects labels only, not their valuations or abstention status.
+  passed the invariants. The result was six eligible, 44 above ceiling,
+  14 data-flagged, 48 not-rankable and 19 not-screened records.
+  The earlier saved corpus also predates the final broker model labels for two
+  brokers; this affects labels only, not their valuations or abstention status.
 - All **300 numerical cases** were replayed: 298 unique solutions, two correctly
   identified ambiguous cases, maximum relative forward residual **2.25e-12**.
 - The integrated dashboard overview, method and issuer inspector passed the

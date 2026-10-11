@@ -9,7 +9,10 @@ from . import asset_models, financial_models, operating_models, models, valuatio
 def build(data,selections,context):
     family=context['family']
     revenue=S.latest(selections['income'].frame,'revenue')
-    if family in ('operating','cyclical') and (not math.isfinite(revenue) or revenue<=0):
+    if family in ('operating','cyclical') and not math.isfinite(revenue):
+        # Missing revenue data is missing evidence, not evidence of no revenue.
+        raise V.InvalidModel('operating revenue unavailable in the selected statement: essential input missing')
+    if family in ('operating','cyclical') and revenue<=0:
         result=asset_models.build_recovery(data,selections,context)
         reason='No positive operating revenue supports an earnings forecast; disclosed asset-recovery hypotheses are quantified and unvalued project/franchise assets identified.'
     elif family in ('bank','insurer','financial_other','hybrid','holdco','mortgage_reit'):
@@ -152,12 +155,14 @@ def evaluate(data,selections,context,m,flags,blockers,assembly=None):
                 if denominator>0:scope_prices.append({'basis':alternative['id'],'conditional':alternative['conditional'],
                     'base_value_per_quote_unit':price*base/denominator,'assumption':alternative.get('assumption',alternative['scope'])})
     m['quote_scope_scenarios']=json.dumps(scope_prices,sort_keys=True)
+    stress=min(stress,base)  # the adverse value is a downside by definition; a cheaper growth path cannot lift it
     m.update(not_rankable='',value_reasonable=base,value_adverse=stress,value_upside=upside,
              entry_ceiling=ceiling,value_at_policy_hurdle=results['base']['value_at_policy_hurdle'],ceiling_px=price*ceiling/cap,
              reasonable_px=price*base/cap,adverse_px=price*stress/cap,upside_px=price*upside/cap,
              valuation_range_low_px=price*min(base,stress,upside)/cap,
              valuation_range_high_px=price*max(base,stress,upside)/cap,
-             base_cashflows=json.dumps(results['base']['cashflows']),stress_cashflows=json.dumps(results['stress']['cashflows']),
+             base_cashflows=json.dumps(results['base']['cashflows']),base_terminal_cashflow=results['base']['terminal_cashflow'],
+             base_opening_distribution=results['base']['opening_distribution'],base_terminal_growth=results['base']['terminal_growth'],stress_cashflows=json.dumps(results['stress']['cashflows']),
              funding_required=results['base']['funding_required'],funding_required_stress=results['stress']['funding_required'],
              entry_score_raw=100*(1-cap/ceiling) if ceiling>0 else None,
              entry_score=max(-100.,100*(1-cap/ceiling)) if ceiling>0 else -100.,
@@ -166,7 +171,8 @@ def evaluate(data,selections,context,m,flags,blockers,assembly=None):
              terminal_value_fraction=(results['base']['terminal_cashflow']/(rate-results['base']['terminal_growth'])/(1+rate)**years/results['base']['raw_value'])
                  if results['base']['terminal_cashflow'] and results['base']['raw_value'] else 0.)
     if stress>base or upside<base:flags.append('scenario ordering crosses: displayed envelope is not a probability bound')
-    if results['base']['funding_required']>0:flags.append('owner capital contributions included in valuation; financing availability is uncertain')
+    if results['base']['funding_required']>1e-6*max(1.0,abs(base)):flags.append('owner capital contributions included in valuation; financing availability is uncertain')
+    if context.get('family')=='holdco':flags.append('holding company valued on consolidated book; NAV / sum-of-parts not modeled')
     if base==0:flags.append('base continuation value nonpositive; limited-liability endpoint shown, unmodeled option value not asserted')
     if plan['model']=='asset_recovery':flags.append('unvalued operating or project assets; partial recovery estimate only')
     future=results['base']['cashflows']+[results['base']['terminal_cashflow']]
