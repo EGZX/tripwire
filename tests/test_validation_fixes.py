@@ -186,13 +186,26 @@ def test_every_industry_crosswalk_entry_points_at_a_reference_industry():
 
 def test_consensus_earnings_collapse_reaches_the_margin_path():
     # One-product pattern: consensus EPS 2.04 -> 0.495 -> 0.057 while the reported margin is 42%.
-    d = operating()
+    # The record contains a loss year, so a collapse is within the company's own experience.
+    loss_record = lambda: _set(d, "income_stmt", "Net Income Common Stockholders", [152, 138, -60, 112]) or d
+    d = operating(); loss_record()
+    without = run(d)
+    d = operating(); loss_record()
     d["earnings_estimate"] = pd.DataFrame({"avg": [0.495, 0.057], "yearAgoEps": [2.04, 0.495]}, index=["0y", "+1y"])
     with_consensus = run(d)
-    without = run(operating())
     path = json.loads(with_consensus["scenario_parameters"])["base"]["margin_path"]
     assert path[1] < path[0] < json.loads(without["scenario_parameters"])["base"]["margin_start"]
     assert with_consensus["value_reasonable"] < without["value_reasonable"]
+
+
+def test_consensus_margins_stay_within_the_companys_recorded_range():
+    # A steadily profitable record: a consensus swing (often a one-off gain reversing) is bounded by the record.
+    d = operating()
+    d["earnings_estimate"] = pd.DataFrame({"avg": [0.495, 0.057], "yearAgoEps": [2.04, 0.495]}, index=["0y", "+1y"])
+    m = run(d)
+    params = json.loads(m["scenario_parameters"])["base"]
+    record = [x for x in json.loads(m["model_evidence"]) if x.get("field") == "historical_net_margins"][0]["value"]
+    assert min(record) - 1e-12 <= min(params["margin_path"][:2])
 
 
 def test_consensus_growth_needs_a_positive_base():
@@ -242,3 +255,27 @@ def test_candidate_needs_a_stress_value_covering_the_policy_share_of_the_price()
                            "value_adverse": adverse, "mcap_fc": 100.0}
     status = scoring.score(pd.DataFrame([row(floor * 100 + 1), row(floor * 100 - 1), row(float("nan"))]), cfg)["status"]
     assert list(status) == ["eligible", "weak downside", "eligible"]
+
+
+def test_mature_return_on_new_equity_keeps_part_of_todays_excess():
+    from screener.policy import get
+    m = run(operating())
+    params = json.loads(m["scenario_parameters"])
+    hurdle, pol = m["hurdle"], get()
+    base = params["base"]
+    current = base["margin_terminal"] / base["equity_to_sales"]
+    expected = hurdle + min(pol.franchise_share * max(0.0, current - hurdle), pol.franchise_cap)
+    assert base["terminal_equity_return"] == pytest.approx(expected)
+    assert params["stress"]["terminal_equity_return"] == pytest.approx(hurdle)
+    assert params["upside"]["terminal_equity_return"] >= base["terminal_equity_return"]
+
+
+def test_index_list_rows_are_given_listings_labeled_with_the_list(tmp_path):
+    from screener import universe
+    p = tmp_path / "idx.csv"
+    p.write_text("yahoo_symbol,name\nBRK-B,Berkshire Hathaway\nAOS,A. O. Smith\n", encoding="utf-8")
+    rows = universe.load_index_list(p, "S&P 500")
+    assert [(e.yahoo, e.lists) for e in rows] == [("BRK-B", {"S&P 500"}), ("AOS", {"S&P 500"})]
+    assert universe.load_index_list(tmp_path / "missing.csv", "x") == []
+    both = universe.dedupe_by_symbol(rows + [universe.Entry(key="AOS", name="AOS", yahoo="AOS", lists={"Watchlist"})])
+    assert next(e for e in both if e.yahoo == "AOS").lists == {"S&P 500", "Watchlist"}

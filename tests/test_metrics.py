@@ -306,7 +306,9 @@ def test_minimum_hurdle_applies_after_currency_lookup():
     m = run(d, cfg_with(min_hurdle=0.07))
     assert m["hurdle"] == pytest.approx(0.07)
     assert m['discount_rate']==pytest.approx(.07)
-    assert json.loads(m['scenario_parameters'])['base']['terminal_equity_return']==pytest.approx(.07)
+    params=json.loads(m['scenario_parameters'])
+    assert params['stress']['terminal_equity_return']==pytest.approx(.07)          # stress: the edge is competed away
+    assert .07<=params['base']['terminal_equity_return']<=.07+0.10+1e-12           # base: hurdle plus capped franchise
 
 
 @pytest.mark.usefixtures("neutral_leverage")

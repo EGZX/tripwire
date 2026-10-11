@@ -3,6 +3,7 @@
 [inputs]
 watchlist = "input/watchlist.csv"   # symbol,name,isin,yahoo_symbol,lists   (see examples/)
 holdings = "input/holdings.csv"     # isin,symbol,name,shares,value_eur,cost_eur   (optional)
+index_lists = { "S&P 500" = "input/sp500.csv" }  # label = yahoo_symbol,name file; refresh: python tools/refresh_index_list.py
 symbol_overrides = "overrides/symbols.csv"
 classification_overrides = "overrides/classification.csv"
 valuation_overrides = "overrides/valuation.toml" # source-labeled sector facts and base/stress assumptions

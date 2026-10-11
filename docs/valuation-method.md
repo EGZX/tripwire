@@ -141,7 +141,20 @@ EPS, so its levels are not used; its growth rates are. Years 1-2 margins apply
 the consensus earnings growth (time-weighted like revenue) to reported clean
 income, then fade linearly to the terminal margin. A forecast earnings collapse
 or ramp therefore reaches the valuation; without a positive consensus base the
-reported margin path is used.
+reported margin path is used. Consensus-implied margins stay within the
+company's own recorded margin range: current-year consensus EPS can contain
+one-off gains that reported clean income excludes, and their reversal would
+otherwise count twice; a real collapse remains possible when the record holds
+losses.
+
+At maturity, new equity earns the hurdle plus half of today's excess return on
+equity (terminal margin / equity per revenue), capped at 10 points (upside:
+three quarters, 15 points; stress: the hurdle). The financial model uses the
+same franchise settings. Returns on equity persist: in the backtest, companies
+starting at 15-25% (above 25%) return on equity still earned a median 18% (26%)
+ten years later, and new equity added in years 5-10 earned 20-40%. Persistence
+beyond ten years cannot be observed in the data; the cap keeps about half of the
+excess still seen after a decade.
 
 Annual EPS estimates need fiscal-period, currency and economic share-unit
 reconciliation. Same currency alone is insufficient for an ADR or another class.
@@ -216,6 +229,11 @@ correctly. A new provider industry needs at most one line in the industry
 crosswalk, and a test checks every crosswalk target exists in the reference.
 
 ## Ranking and controls
+
+Index lists ([inputs] index_lists, e.g. the S&P 500 from
+tools/refresh_index_list.py) are screened with the same rules and labeled in the
+Lists column, so a watchlist can be compared with its market. On 2026-10-11 the
+model implied a median 7.0% for S&P 500 members, and 25 of 503 were candidates.
 
 A candidate needs more than a price below the entry ceiling: its stress value
 must cover at least the policy share of the price (stress_floor, default half).

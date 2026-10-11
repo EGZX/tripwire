@@ -280,6 +280,10 @@ def build(data,selections,context):
     if ge1 is not None and finite(base_income) and base_income>0:
         r1=revenue*(1+g0);r2=r1*(1+next_growth)
         m1=base_income*(1+ge1)/r1;m2=base_income*(1+ge1)*(1+ge2)/r2
+        # Keep consensus-implied margins within the company's own recorded range: consensus EPS can carry one-off
+        # gains in the current year that reported clean income excludes, and applying their reversal to the clean
+        # base would count it twice. A real collapse stays possible when the record contains losses.
+        if margins:m1,m2=(min(max(x,min(margins)),max(margins)) for x in (m1,m2))
         if max(m1,m2)<=policy().margin_limit:
             margin_path=[m1,m2][:years]+[m2+(terminal-m2)*(t-2)/(years-2) for t in range(3,years+1)]
         else:earnings_basis='consensus margins above the margin limit; not used'
@@ -290,19 +294,27 @@ def build(data,selections,context):
         F.merge_dependencies(dependencies,forecast)
     typical=median(intensity_observations)
     upside_intensities=[x for x in intensity_observations if x>=0.25*typical] or [intensity]  # drop near-zero-book years
-    def params(g,start,end,capital,g2=None):
+    # Mature return on new equity: the hurdle plus a share of today's excess return, capped (the same franchise
+    # rule as the financial model). Returns on equity persist strongly: in the 2012-2016 backtest companies starting
+    # at 15-25% (above 25%) still earned a median 18% (26%) ten years later. Stress assumes the edge is competed away.
+    pol=policy()
+    current_return=terminal/intensity if intensity>0 else math.nan
+    excess=max(0.0,current_return-rate) if finite(current_return) else 0.0
+    mature={'base':rate+min(pol.franchise_share*excess,pol.franchise_cap),'stress':rate,
+            'upside':rate+min(pol.upside_franchise_share*excess,pol.upside_franchise_cap)}
+    def params(g,start,end,capital,g2=None,case='base'):
         return dict(revenue=revenue,growth=g,growth_path=growth_path(g,g if g2 is None else g2,gt,years),margin_start=start,
-                    margin_terminal=end,equity_to_sales=capital,terminal_equity_return=rate,terminal_growth=gt)
+                    margin_terminal=end,equity_to_sales=capital,terminal_equity_return=mature[case],terminal_growth=gt)
     base=params(g0,margin_path[0] if margin_path else first_margin,terminal,intensity,next_growth)
     if margin_path:base['margin_path']=margin_path
     # Stress must lower value. Lower growth lowers value only when new equity earns more than the hurdle, so both
     # growth directions are priced and the lower one is kept.
-    stress_options=[params(g,min(starts),min(terminals),max(intensity_observations)) for g in (min(growth_cases),g0)]
+    stress_options=[params(g,min(starts),min(terminals),max(intensity_observations),case='stress') for g in (min(growth_cases),g0)]
     def priced(p):
         try:return project(p,years,rate,gt)['value']
         except V.InvalidModel:return math.inf
     stress=min(stress_options,key=priced)
-    upside=params(max(growth_cases),max(starts),max(terminals),min(upside_intensities))
+    upside=params(max(growth_cases),max(starts),max(terminals),min(upside_intensities),case='upside')
     warnings=list(forecast.get('warnings',[]))+rejected_growth
     if current_margin<=0:warnings.append('Recovery scenario: future profitability and access to owner funding are assumptions, not established facts.')
     if context.get('family')=='cyclical':warnings.append('Cycle scenarios use observed annual ranges and an external industry reference; they are not a certified full-cycle forecast.')
@@ -322,7 +334,7 @@ def build(data,selections,context):
                 {'parameter':'margin_path','value':margin_path,'basis':earnings_basis+('; years 3+ fade linearly to the terminal margin' if margin_path else '')},
                 {'parameter':'terminal_margin','value':terminal,'basis':terminal_basis},
                 {'parameter':'equity_to_sales','value':intensity,'basis':intensity_basis},
-                {'parameter':'terminal_equity_return','value':rate,'basis':'new investment earns the policy equity return at maturity; no perpetual excess return assumed'},
+                {'parameter':'terminal_equity_return','value':mature['base'],'basis':f"hurdle plus {pol.franchise_share:.0%} of today's excess return on equity ({current_return:.1%} vs {rate:.1%}), at most {pol.franchise_cap:.0%} points; stress: the hurdle"},
                 {'parameter':'capital_structure','basis':'constant financing convention implicit in after-interest common earnings; no second debt/cash/lease subtraction'},
                 {'parameter':'scenario_envelope','basis':'observations and reference hypotheses, not confidence bounds or scenario probabilities'}],
             'warnings':warnings}

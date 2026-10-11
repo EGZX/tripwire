@@ -105,6 +105,19 @@ def load_watchlist(path: Path) -> list[Entry]:
     return list(entries.values())
 
 
+def load_index_list(path: Path, label: str) -> list[Entry]:
+    """An index or other reference list (yahoo_symbol,name): every row is labeled with the list name. Symbols are
+    taken as given Yahoo listings, so no name search runs for hundreds of rows."""
+    if not Path(path).exists():
+        return []
+    out = []
+    for r in _rows(path):
+        ysym = (r.get("yahoo_symbol") or r.get("symbol") or "").strip()
+        if ysym:
+            out.append(Entry(key=ysym, name=r.get("name") or ysym, ticker=ysym, yahoo=ysym, lists={label}))
+    return out
+
+
 def load_holdings(path: Path) -> list[Entry]:
     if not Path(path).exists():
         return []

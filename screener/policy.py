@@ -45,10 +45,12 @@ class Policy:
     # ---- financial (common-equity) model
     franchise_share: float = 0.5
     """Share of today's excess return over the hurdle a mature franchise keeps (base case)."""
-    franchise_cap: float = 0.05
-    """Maximum mature excess return over the hurdle (base case)."""
+    franchise_cap: float = 0.10
+    """Maximum mature excess return over the hurdle (base case), for operating and financial models alike.
+    Backtest: companies starting above 25% return on equity kept a median 19 points of excess ten years later;
+    keeping half of that in perpetuity gives this cap."""
     upside_franchise_share: float = 0.75
-    upside_franchise_cap: float = 0.10
+    upside_franchise_cap: float = 0.15
     stress_return_factor: float = 0.75
     """Stress starts at most at this fraction of the base return on book."""
     stress_growth_factor: float = 0.5
