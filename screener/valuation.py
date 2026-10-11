@@ -95,8 +95,12 @@ def solve_distribution_return(cashflows, terminal_cashflow: float, price: float,
     A negative opening distribution is an additional initial contribution, so
     the effective investment is price minus opening_distribution. Nonnegative
     future cash flows with at least one positive payment have a strictly
-    decreasing PV. Signed future paths remain valid valuations but this solver
-    does not claim that their yield is unique, absent, or multiple.
+    decreasing PV. Owner contributions (negative future distributions) keep the
+    yield unique when they all come before the payouts: the owner's cash-flow
+    sequence then changes sign once, and by Descartes' rule of signs (Laguerre's
+    extension for the convergent perpetuity series in 1/(1+r)) the value equation
+    has at most one root. Contributions after payouts begin (more than one sign
+    change) remain valid valuations without a claimed unique yield.
 
     Residuals use reporting-currency units; the numerical budget is relative to
     the effective initial investment (the existing price budget when opening0).
@@ -107,9 +111,13 @@ def solve_distribution_return(cashflows, terminal_cashflow: float, price: float,
         finite(*ds, terminal_cashflow, price, terminal_growth, opening_distribution)
         if not ds or price <= 0 or terminal_growth <= -1:
             raise InvalidModel("positive price, nonempty distributions and terminal growth above -100% required")
-        if any(x < 0 for x in [*ds, terminal_cashflow]):
-            return Solution("not_identified", reason="future distributions include capital calls; yield uniqueness has not been established")
         investment = price - opening_distribution
+        if any(x < 0 for x in [*ds, terminal_cashflow]):
+            signs = [x > 0 for x in [*ds, terminal_cashflow] if x != 0]
+            first_payout = next((k for k, positive in enumerate(signs) if positive), len(signs))
+            calls_after_payouts = not all(signs[first_payout:])
+            if investment <= 0 or terminal_cashflow < 0 or calls_after_payouts or not any(signs):
+                return Solution("not_identified", reason="owner contributions follow payouts (more than one sign change); yield uniqueness has not been established")
         if not math.isfinite(investment):
             return Solution("unresolved", reason="net opening investment exceeds numerical range")
         if not any(x > 0 for x in [*ds, terminal_cashflow]):

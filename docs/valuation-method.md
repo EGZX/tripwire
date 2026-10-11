@@ -286,9 +286,12 @@ reports retain their original numbers and model labels.
 
 A priced path with nonnegative future distributions and at least one positive
 payment identifies a unique cash-flow yield. Opening contributions increase the
-initial investment and do not destroy uniqueness. Signed future distributions
-remain valid valuation inputs, but a single yield is withheld unless uniqueness
-is established. Finite distributions permit returns above -100%; positive
+initial investment and do not destroy uniqueness. Owner contributions that all come
+before the payouts keep the yield unique (one sign change in the owner's cash
+flows; Descartes' rule of signs), so growth companies that need capital first
+still get an implied yield. Contributions after payouts begin remain valid
+valuation inputs, but a single yield is withheld unless uniqueness is
+established. Finite distributions permit returns above -100%; positive
 perpetuities require return above terminal growth. The numerical search reports
 an explicit outside-domain result above its 300% upper bound. Multi-driver
 scenarios do not identify a unique market-implied growth rate.

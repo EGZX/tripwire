@@ -331,3 +331,18 @@ def test_stress_is_calibrated_to_realized_outcomes_of_similar_scenarios():
     assert O.calibrated_stress(0.0, 0.0)[0] == 0.0                                          # no base: nothing to scale
     m = run(operating())
     assert m["stress_cover"] == pytest.approx(m["value_adverse"] / m["mcap_fc"])
+
+
+def test_capital_calls_before_payouts_still_identify_a_unique_yield():
+    from screener import valuation as V
+    flows, terminal, price, g = [-30.0, -10.0, 15.0, 25.0, 30.0], 32.0, 100.0, 0.03
+    s = V.solve_distribution_return(flows, terminal, price, g)
+    assert s.status == "solved"
+    r = s.value
+    assert V.discount(flows, terminal, r, g) == pytest.approx(price, rel=1e-8)
+    # one sign change: the value equation crosses the price exactly once over the admissible domain
+    grid = [g + 1e-4 + k * 0.002 for k in range(1500)]
+    gaps = [V.discount(flows, terminal, x, g) - price for x in grid]
+    assert sum((a > 0) != (b > 0) for a, b in zip(gaps, gaps[1:])) == 1
+    late_call = V.solve_distribution_return([20.0, -50.0, 30.0], 10.0, 100.0, g)
+    assert late_call.status == "not_identified"                       # contribution after payouts: not claimed
