@@ -355,5 +355,5 @@ def test_holdings_never_attach_to_index_rows_by_company_name(tmp_path):
     fund = universe.Entry(key="XS0000000001", name="Acme Global Equity UCITS ETF Acc", isin="XS0000000001", owned=True,
                           lists={"Holdings"})
     merged = universe.merge([], [fund]) + universe.load_index_list(p, "S&P 500")
-    ivz = next(e for e in merged if e.yahoo == "IVZ")
-    assert not ivz.owned and ivz.lists == {"S&P 500"}
+    issuer = next(e for e in merged if e.yahoo == "ACME")
+    assert not issuer.owned and issuer.lists == {"S&P 500"}
