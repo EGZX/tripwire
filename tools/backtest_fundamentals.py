@@ -354,6 +354,61 @@ def pooled(df: pd.DataFrame, a: str, f: str) -> float:
     return d[a].sum() / d[f].sum() if len(d) and d[f].sum() else math.nan
 
 
+def value_frame(firms: pd.DataFrame, fy: pd.DataFrame, years: int) -> pd.DataFrame:
+    """Per company: model value parts and the value under realized fundamentals, both at the model's own hurdle."""
+    start = firms.set_index(["cik", "cohort"])
+    vals = []
+    for (cik, cohort), g in fy.groupby(["cik", "cohort"]):
+        m = start.loc[(cik, cohort)]
+        if m.years_observed < years or g.a_distribution.isna().any():
+            continue
+        disc = [(1 + m.hurdle) ** -t for t in g.year]
+        pv_f = sum(x * w for x, w in zip(g.f_distribution, disc))
+        pv_a = sum(x * w for x, w in zip(g.a_distribution, disc))
+        last = g[g.year == years].iloc[0]
+        tv = m.value - m.opening - pv_f                 # model terminal PV
+        surplus0 = m.get("surplus0", 0.0) if "surplus0" in m else 0.0
+        surplus0 = surplus0 if surplus0 == surplus0 else 0.0
+        operating = last.a_income - (last.get("a_surplus_income", 0.0) if last.get("a_surplus_income") == last.get("a_surplus_income") else 0.0)
+        scale = operating / last.f_income if last.f_income > 0 else math.nan
+        surplus10 = last.get("a_surplus", math.nan)
+        # The model distributes the surplus at par at the start; in reality it stays and is still there in year 10.
+        pv_a += (surplus10 if surplus10 == surplus10 else 0.0) * (1 + m.hurdle) ** -years
+        pv_f += surplus0
+        vals.append(dict(value=m.value, pv_f=pv_f, pv_a=pv_a, tv=tv, tv_a=tv * scale if scale == scale else math.nan, g0=m.g0,
+                         stress=m.stress_value, opening=m.opening, equity0=m.equity0, surplus0=surplus0,
+                         net_debt0=m.get("net_debt0", math.nan)))
+    v = pd.DataFrame(vals).dropna(subset=["pv_f", "pv_a", "tv", "tv_a"])
+    v = v[(v.pv_f + v.tv) > 0]
+    v = v.copy()
+    v["realized"] = v.opening - v.surplus0 + v.pv_a + v.tv_a  # pv_a already holds the surplus
+    return v
+
+
+STRESS_EDGES = [0.0, 0.25, 0.50, 0.75]  # model stress value / base value: 0, (0-25%], (25-50%], (50-75%], above
+
+
+def stress_calibration(v: pd.DataFrame, quantile: float = 0.25) -> dict:
+    """Realized value / base value at `quantile` for companies grouped by their model stress / base ratio.
+
+    The model's stress scenario ranks downside risk but its level is not a probability statement; this table
+    turns each group's scenario into the outcome actually seen at that percentile. Groups are made monotone
+    (a riskier group never gets a higher ratio)."""
+    ratio = (v.stress / v.value).clip(lower=0)
+    groups = pd.cut(ratio, [-1e-9, *STRESS_EDGES[1:], math.inf], labels=False)
+    groups[ratio <= 0] = -1
+    rows = []
+    for g, upper in zip([-1, 0, 1, 2, 3], [0.0, *STRESS_EDGES[1:], None]):
+        d = v[groups == g]
+        rows.append({"stress_to_base_up_to": upper, "companies": int(len(d)),
+                     "realized_to_base": float((d.realized / d.value).quantile(quantile)) if len(d) else math.nan})
+    best = -math.inf
+    for r in rows:  # monotone: more scenario headroom never maps to a worse calibrated outcome
+        best = max(best, r["realized_to_base"]) if r["realized_to_base"] == r["realized_to_base"] else best
+        r["realized_to_base"] = max(0.0, best)
+    return {"quantile": quantile, "groups": rows}
+
+
 def summarise(firms: pd.DataFrame, fy: pd.DataFrame, skipped: dict, years: int) -> str:
     lines = ["# Fundamentals backtest of the operating model", "",
              f"Run {date.today().isoformat()}. Cohorts: {', '.join(map(str, sorted(firms.cohort.unique())))}. "
@@ -400,29 +455,7 @@ def summarise(firms: pd.DataFrame, fy: pd.DataFrame, skipped: dict, years: int) 
                   f"- Model's starting operating equity per revenue (median): {s0.intensity[grew].median():.2f}; "
                   f"book equity per revenue: {(s0.equity0 / s0.revenue0)[grew].median():.2f}"]
     # Value under realized fundamentals vs model value, discounted at the model's own hurdle.
-    vals = []
-    for (cik, cohort), g in fy.groupby(["cik", "cohort"]):
-        m = start.loc[(cik, cohort)]
-        if m.years_observed < years or g.a_distribution.isna().any():
-            continue
-        disc = [(1 + m.hurdle) ** -t for t in g.year]
-        pv_f = sum(x * w for x, w in zip(g.f_distribution, disc))
-        pv_a = sum(x * w for x, w in zip(g.a_distribution, disc))
-        last = g[g.year == years].iloc[0]
-        tv = m.value - m.opening - pv_f                 # model terminal PV
-        surplus0 = m.get("surplus0", 0.0) if "surplus0" in m else 0.0
-        surplus0 = surplus0 if surplus0 == surplus0 else 0.0
-        operating = last.a_income - (last.get("a_surplus_income", 0.0) if last.get("a_surplus_income") == last.get("a_surplus_income") else 0.0)
-        scale = operating / last.f_income if last.f_income > 0 else math.nan
-        surplus10 = last.get("a_surplus", math.nan)
-        # The model distributes the surplus at par at the start; in reality it stays and is still there in year 10.
-        pv_a += (surplus10 if surplus10 == surplus10 else 0.0) * (1 + m.hurdle) ** -years
-        pv_f += surplus0
-        vals.append(dict(value=m.value, pv_f=pv_f, pv_a=pv_a, tv=tv, tv_a=tv * scale if scale == scale else math.nan, g0=m.g0,
-                         stress=m.stress_value, opening=m.opening, equity0=m.equity0, surplus0=surplus0,
-                         net_debt0=m.get("net_debt0", math.nan)))
-    v = pd.DataFrame(vals).dropna(subset=["pv_f", "pv_a", "tv", "tv_a"])
-    v = v[(v.pv_f + v.tv) > 0]
+    v = value_frame(firms, fy, years)
     if len(v):
         v["ratio"] = (v.pv_a + v.tv_a) / (v.pv_f + v.tv)
         v["bucket"] = pd.cut(v.g0, [-1, 0, 0.05, 0.10, 0.20, 10], labels=["shrinking", "0-5%", "5-10%", "10-20%", "above 20%"])
@@ -430,7 +463,7 @@ def summarise(firms: pd.DataFrame, fy: pd.DataFrame, skipped: dict, years: int) 
         for name, d in v.groupby("bucket", observed=True):
             by.append(f"| {name} | {len(d)} | {(d.pv_a.sum() + d.tv_a.sum()) / (d.pv_f.sum() + d.tv.sum()):.2f} | {d.ratio.median():.2f} |")
         # Stress case: how often did the realized value fall below the model's stress value?
-        realized = v.opening - v.surplus0 + v.pv_a + v.tv_a  # pv_a already holds the surplus
+        realized = v.realized
         by += ["", "| Starting growth | Realized below stress value | Realized below half the base value |", "|---|---|---|"]
         for name, d in v.assign(realized=realized).groupby("bucket", observed=True):
             by.append(f"| {name} | {(d.realized < d.stress).mean():.0%} | {(d.realized < 0.5 * d.value).mean():.0%} |")
@@ -468,7 +501,14 @@ def main(argv=None) -> int:
     ap.add_argument("--policy", action="append", default=[], metavar="KEY=VALUE",
                     help="test a [model_policy] setting, e.g. growth_half_life=1.5 (repeatable)")
     ap.add_argument("--out", default="", help="suffix for the output files, e.g. _hl15")
+    ap.add_argument("--from-saved", metavar="SUFFIX", help="summarise saved firms/firm_years CSVs instead of rerunning")
+    ap.add_argument("--write-stress-calibration", action="store_true",
+                    help="write screener/resources/stress_calibration.json from this backtest")
     args = ap.parse_args(argv)
+    if args.from_saved is not None:
+        firms = pd.read_csv(OUT / f"firms{args.from_saved}.csv")
+        fy = pd.read_csv(OUT / f"firm_years{args.from_saved}.csv")
+        return finish(firms, fy, {}, args, {})
     warnings.filterwarnings("ignore")
     cfg = load_config(ROOT / "config.toml")
     overrides = {k: float(v) for k, v in (x.split("=", 1) for x in args.policy)}
@@ -491,6 +531,20 @@ def main(argv=None) -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     firms.to_csv(OUT / f"firms{args.out}.csv", index=False)
     fy.to_csv(OUT / f"firm_years{args.out}.csv", index=False)
+    return finish(firms, fy, skipped, args, overrides)
+
+
+def finish(firms, fy, skipped, args, overrides) -> int:
+    if args.write_stress_calibration:
+        cohorts = sorted(int(c) for c in firms.cohort.unique())
+        table = {"as_of": date.today().isoformat(), "source": "tools/backtest_fundamentals.py",
+                 "cohorts": cohorts, "horizon_years": args.years,
+                 "meaning": "outcome at the quantile (realized value / model base value) of companies whose model stress / base "
+                            "ratio falls in each group; groups: 0, up to 25%, 50%, 75%, above",
+                 **stress_calibration(value_frame(firms, fy, args.years))}
+        path = ROOT / "screener" / "resources" / "stress_calibration.json"
+        path.write_text(json.dumps(table, indent=1), encoding="utf-8")
+        print(f"stress calibration -> {path}")
     text = summarise(firms, fy, skipped, args.years)
     if overrides:
         text = text.replace("\n\n", f"\n\nPolicy tested: {overrides}\n\n", 1)

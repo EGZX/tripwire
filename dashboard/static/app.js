@@ -387,7 +387,7 @@ const C = {
   ccy: { key: "quote_ccy", label: "Ccy" },
   head: { key: "headroom", label: "To ceiling", num: true, title: "Price change that puts the price exactly on the max entry price (ceiling / price − 1)",
     fmt: (r) => fmtSignedPct(headroom(r)), sort: (r) => headroom(r), cellCls: (r) => headroom(r) >= 0 ? "pos-text" : "" },
-  adv: { key: "adverse_score", label: "Stress score", num: true, title: "Same formula against the adverse-case value: the downside check", fmt: (r) => fmtScore(r.adverse_score), sort: (r) => num(r.adverse_score) },
+  adv: { key: "stress_cover", label: "Bad-case cover", num: true, title: "Stress value as a share of the price. For operating companies the stress value is the backtested one-in-four bad outcome of companies with a similar stress scenario; candidates need at least 50%", fmt: (r) => fmtPct(r.stress_cover, 0), sort: (r) => num(r.stress_cover) },
   impRet: { key: "implied_return", label: "Impl. flow yield", num: true, fmt: (r) => fmtPct(r.implied_return), sort: (r) => num(r.implied_return) },
   hurdle: { key: "hurdle", label: "Hurdle", num: true, fmt: (r) => fmtPct(r.hurdle), sort: (r) => num(r.hurdle) },
   spread: { key: "spread", label: "Yield − required", num: true, title: "Implied cash-flow yield minus the binding required rate, percentage points",
@@ -1457,7 +1457,7 @@ async function renderInspector() {
       scored ? h("div", { class: "score-line" }, h("span", { class: "big", text: fmtScore(x) }),
         h("span", { class: "expl", text: num(r.ceiling_px) <= 0 ? "No positive base continuation value; recovery option value is not asserted" : hr >= 0 ? "price is " + fmtPct(1 - num(r.price) / num(r.ceiling_px), 0) + " below the max entry price" : "price must fall " + fmtPct(-hr, 0) + " to reach the max entry price" }))
         : h("div", { class: "dim", text: r.not_rankable ? "Not rankable: " + r.not_rankable : r.status === "not screened" ? "Not screened (" + (r.class || "") + "): no ceiling is computed for this class." : "No score." }),
-      scored && ok(r.adverse_score) ? h("div", { class: "small dim", text: "Stress score " + fmtScore(r.adverse_score) }) : null,
+      scored && ok(r.stress_cover) ? h("div", { class: "small dim", text: "Bad-case cover " + fmtPct(r.stress_cover, 0) + " of the price" + (r.stress_basis ? " · " + r.stress_basis : "") }) : null,
       scored && ok(r.cost_score) ? h("div", { class: "small dim", text: "Score at your avg cost (" + fmtPx(r.cost_px) + ") " + fmtScore(r.cost_score) }) : null,
       scored ? ladder(r) : null),
     scored || has("price") ? h("div", { class: "insp-section" }, h("h4", { text: "Valuation (" + (ccy || "quote currency") + " per share)" }), kv([

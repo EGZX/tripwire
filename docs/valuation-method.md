@@ -246,10 +246,20 @@ model implied a median 7.0% for S&P 500 members, and 25 of 503 were candidates.
 
 A candidate needs more than a price below the entry ceiling: its stress value
 must cover at least the policy share of the price (stress_floor, default half).
-Otherwise its status is "weak downside". In the backtest the realized value fell
-below the stress value for about 29% of companies (21-33% across growth
-groups), so the stress case is roughly a one-in-three bad outcome, and the floor
-asks that such an outcome still leaves half the price.
+Otherwise its status is "weak downside". The reports show this as bad-case cover
+(stress value / price).
+
+For operating companies the stress value is calibrated. The stress scenario
+combines the worst observed inputs; in the backtest it ranked downside risk (a
+lower scenario went with a worse tail) but its level was not a probability
+statement: a scenario value of zero went with a median realized outcome of 1.19x
+the base value. The stress value is therefore the one-in-four (25th percentile)
+realized outcome of backtest companies whose scenario was a similar share of
+base value: 0.09x base for a zero scenario, 0.29x up to 25%, 0.39x up to 50%,
+0.49x above (screener/resources/stress_calibration.json, written by
+tools/backtest_fundamentals.py --write-stress-calibration). One in four
+companies delivered at most about 0.4x the model's base value over ten years;
+that dispersion, not the formula, is why most bad-case covers are low.
 
 A stock can have a conditional valuation without qualifying as a candidate.
 Missing essentials, invalid economic domains and contradictory used evidence

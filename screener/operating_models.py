@@ -64,6 +64,33 @@ def references():
     except (OSError,ValueError) as exc:raise V.InvalidModel('industry-reference evidence unavailable: '+str(exc)) from exc
 
 
+@lru_cache(maxsize=1)
+def stress_table():
+    """Backtest calibration of the stress scenario (tools/backtest_fundamentals.py --write-stress-calibration)."""
+    try:return json.loads((Path(__file__).parent/'resources/stress_calibration.json').read_text(encoding='utf-8'))
+    except (OSError,ValueError):return None
+
+
+def calibrated_stress(base,scenario):
+    """Stress value as the outcome actually seen at the table's quantile for companies with the same scenario ratio.
+
+    The stress scenario combines the worst observed inputs; it ranks downside risk well but its level is not a
+    probability statement (a zero scenario value went with a median realized 1.19x base in the backtest). Returns
+    (value, basis); without a table or a positive base the scenario value is kept."""
+    table=stress_table()
+    if not table or not(finite(base) and base>0 and finite(scenario)):
+        return scenario,'stress scenario value (no calibration applied)'
+    ratio=max(0.0,scenario/base)
+    for group in table['groups']:
+        upper=group['stress_to_base_up_to']
+        if upper is None or ratio<=upper:
+            factor=group['realized_to_base']
+            label='0' if upper==0 else ('above '+f"{table['groups'][-2]['stress_to_base_up_to']:.0%}" if upper is None else f'up to {upper:.0%}')
+            return base*factor,(f"{table['quantile']:.0%} worst realized outcome ({factor:.2f} x base) of backtest companies whose "
+                                f"stress scenario was {label} of base ({table['source']}, {table['as_of']})")
+    return scenario,'stress scenario value'
+
+
 def benchmark(info):
     dataset=references();industry=info.get('industry','')
     name=INDUSTRY_REFERENCE.get(industry,industry)

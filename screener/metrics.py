@@ -98,7 +98,8 @@ def _finish_values(m, reasonable, stress, mcap, flags, policy_ceiling=None):
              entry_score=entry_score(mcap,ceiling) if ceiling>0 else -100.,
              adverse_score=entry_score(mcap,stress) if stress>0 else -100. if _isnum(stress) else math.nan,
              ceiling_px=m['price']*ceiling/mcap,reasonable_px=m['price']*reasonable/mcap,
-             adverse_px=m['price']*stress/mcap if _isnum(stress) else math.nan)
+             adverse_px=m['price']*stress/mcap if _isnum(stress) else math.nan,
+             stress_cover=stress/mcap if _isnum(stress) and mcap>0 else math.nan)
     if ceiling==0:flags.append('nonpositive common-equity continuation value; limited-liability endpoint shown')
     if _isnum(stress) and stress>reasonable:flags.append('stress value exceeds base: scenario is not a downside bound')
     m['flags']='; '.join(dict.fromkeys(flags))

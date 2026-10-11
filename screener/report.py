@@ -22,7 +22,7 @@ COLUMNS = {  # column -> (header, number format)
     "position_eur": ("Position €", "#,##0"), "cost_px": ("Your avg cost", PX), "cost_score": ("Score at your cost", "0"), "class": ("Class", None), "status": ("Status", None),
     "candidate": ("Candidate", None), "entry_score": ("Entry score", "0"), "price": ("Price", PX),
     "quote_ccy": ("Ccy", None), "ceiling_px": ("Model entry estimate", PX), "reasonable_px": ("Modeled base value", PX),
-    "adverse_px": ("Operating stress value", PX), "adverse_score": ("Stress score", "0"),
+    "adverse_px": ("Operating stress value", PX), "adverse_score": ("Stress score", "0"), "stress_cover": ("Bad-case cover", PCT),
     "implied_return": ("Implied cash-flow yield", PCT), "fx_parity_return": ("FX-parity scenario", PCT),
     "hurdle": ("Hurdle", PCT), "floor_rate": ("Stress rate", PCT), "caps_hit": ("Caps hit", None), "fin_type": ("Fin. type", None),
     "implied_growth": ("Implied growth", PCT), "est_growth": ("Est. growth", PCT), "adverse_growth": ("Adverse growth", PCT),
@@ -41,7 +41,7 @@ COLUMNS = {  # column -> (header, number format)
     "lists": ("Lists", None), "flags": ("Data flags", None), "not_rankable": ("Not rankable: reason", None),
 }
 DECISION = ["symbol", "name", "owned", "position_eur", "cost_px", "cost_score", "class", "status", "entry_score", "price", "quote_ccy",
-            "ceiling_px", "adverse_px", "adverse_score", "implied_return", "fx_parity_return", "hurdle",
+            "ceiling_px", "adverse_px", "stress_cover", "implied_return", "fx_parity_return", "hurdle",
             "floor_rate", "implied_growth", "est_growth", "adverse_growth", "terminal_growth", "return_on_capital",
             "reinvest_rate", "caps_hit"]
 COLUMNS.update({"decision_rate":("Required rate",PCT),"discount_rate":("Valuation rate",PCT),"model_label":("Model",None),"model_family":("Business family",None),"model_quality":("Model evidence",None),
@@ -252,11 +252,11 @@ def _g(r, col, default=math.nan):
 
 
 def _table(df: pd.DataFrame, limit: int) -> str:
-    lines = ["| # | Symbol | Name | Status | Score | Price | Max entry | Adv. score | Impl. return | Hurdle | Est. g | Adv. g | R | Owned | Flags |",
+    lines = ["| # | Symbol | Name | Status | Score | Price | Max entry | Bad-case cover | Impl. return | Hurdle | Est. g | Adv. g | R | Owned | Flags |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for i, r in enumerate(df.head(limit).itertuples(), start=1):
         lines.append(f"| {i} | {r.symbol} | {str(r.name)[:30]} | {_g(r, 'status', '')} | {_n(_g(r, 'entry_score'))} | "
-                     f"{_n(_g(r, 'price'), 2)} | {_n(_g(r, 'ceiling_px'), 2)} | {_n(_g(r, 'adverse_score'))} | "
+                     f"{_n(_g(r, 'price'), 2)} | {_n(_g(r, 'ceiling_px'), 2)} | {_p(_g(r, 'stress_cover'))} | "
                      f"{_p(_g(r, 'implied_return'))} | {_p(_g(r, 'hurdle'))} | {_p(_g(r, 'est_growth'))} | "
                      f"{_p(_g(r, 'adverse_growth'))} | {_p(_g(r, 'return_on_capital'))} | "
                      f"{'yes' if _g(r, 'owned', False) else ''} | {str(_g(r, 'flags', '') or '')[:50]} |")
@@ -274,7 +274,7 @@ def _markdown(df, cands, ops, fin, pre, blocked, changes, sym_check, cfg, today)
             f"{len(blocked)} not rankable, {len(df) - len(ops) - len(fin) - len(pre)} holdco/fund/other.", "",
            "This is a triage list, not a buy list: candidates need a full valuation before any decision.", "",
            "Score = 100 × (1 − price / model entry estimate). The entry estimate applies the stated valuation and purchase-policy assumptions. "
-           "Stress score compares price with the stress value. Implied flow yield is reported only when the priced distribution path identifies a unique yield; "
+           "Bad-case cover is the stress value as a share of the price; for operating companies the stress value is the backtested one-in-four bad outcome of companies with a similar stress scenario. Implied flow yield is reported only when the priced distribution path identifies a unique yield; "
            "signed future capital calls can leave yield unidentified while still supporting valuation. Growth measures and cash-flow claims depend on the selected model. "
            "Zero is the limited-liability endpoint of a nonpositive modeled continuation value. Scenario ranges are not confidence bounds.", "",
            f"## Candidates ({len(cands)})", "",

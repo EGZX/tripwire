@@ -320,3 +320,14 @@ def test_surplus_needs_known_cash_and_debt():
     assert Om.surplus_at(bal)[0] == pytest.approx(90.0)                        # cash + investments - debt
     bal.loc["Current Liabilities"] = [140.0]                                   # e.g. merchant funds owed to customers
     assert Om.surplus_at(bal)[0] == pytest.approx(150 - 140 + 20 - 20)         # working capital + investments - LT debt
+
+
+def test_stress_is_calibrated_to_realized_outcomes_of_similar_scenarios():
+    table = O.stress_table()
+    assert table and [g["realized_to_base"] for g in table["groups"]] == sorted(g["realized_to_base"] for g in table["groups"])
+    zero_group = table["groups"][0]["realized_to_base"]
+    assert O.calibrated_stress(100.0, 0.0)[0] == pytest.approx(100.0 * zero_group)       # zero scenario is not zero
+    assert O.calibrated_stress(100.0, 90.0)[0] == pytest.approx(100.0 * table["groups"][-1]["realized_to_base"])
+    assert O.calibrated_stress(0.0, 0.0)[0] == 0.0                                          # no base: nothing to scale
+    m = run(operating())
+    assert m["stress_cover"] == pytest.approx(m["value_adverse"] / m["mcap_fc"])

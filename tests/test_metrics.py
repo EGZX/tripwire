@@ -66,13 +66,16 @@ def test_operating_values_tie_to_common_owner_cashflows_without_second_debt_brid
     assert m["not_rankable"] == ""
     assert m['model']=='operating_equity' and m['implied_return_claim']=='equity'
     results=json.loads(m['scenario_results'])
-    for case,column in [('base','value_reasonable'),('stress','value_adverse'),('upside','value_upside')]:
+    for case,column in [('base','value_reasonable'),('stress','stress_scenario_value'),('upside','value_upside')]:
         path=results[case];rate=m['discount_rate']
         # Independent discounted net-owner receipts, including opening capital.
         value=path['opening_distribution']+sum(c/(1+rate)**t for t,c in enumerate(path['cashflows'],1))
         value+=path['terminal_cashflow']/(rate-path['terminal_growth'])/(1+rate)**len(path['cashflows'])
         assert path['raw_value']==pytest.approx(value)
         assert m[column]==pytest.approx(max(0.,value))
+    from screener import operating_models as Om
+    calibrated,_=Om.calibrated_stress(m['value_reasonable'],m['stress_scenario_value'])
+    assert m['value_adverse']==pytest.approx(min(calibrated,m['value_reasonable']))  # the scenario, calibrated
     assert results['base']['ledger'][0]['revenue']==pytest.approx(1050*1.1)
     assert results['base']['ledger'][0]['common_earnings']==pytest.approx(152*1.05*1.1)
     assert results['base']['opening_distribution']==pytest.approx(-600*.10)

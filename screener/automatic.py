@@ -155,7 +155,12 @@ def evaluate(data,selections,context,m,flags,blockers,assembly=None):
                 if denominator>0:scope_prices.append({'basis':alternative['id'],'conditional':alternative['conditional'],
                     'base_value_per_quote_unit':price*base/denominator,'assumption':alternative.get('assumption',alternative['scope'])})
     m['quote_scope_scenarios']=json.dumps(scope_prices,sort_keys=True)
+    stress_scenario=stress
+    stress_basis='stress scenario value'
+    if plan['model']=='operating_equity':
+        stress,stress_basis=operating_models.calibrated_stress(base,stress)
     stress=min(stress,base)  # the adverse value is a downside by definition; a cheaper growth path cannot lift it
+    m.update(stress_scenario_value=stress_scenario,stress_basis=stress_basis,stress_cover=stress/cap if cap>0 else math.nan)
     m.update(not_rankable='',value_reasonable=base,value_adverse=stress,value_upside=upside,
              entry_ceiling=ceiling,value_at_policy_hurdle=results['base']['value_at_policy_hurdle'],ceiling_px=price*ceiling/cap,
              reasonable_px=price*base/cap,adverse_px=price*stress/cap,upside_px=price*upside/cap,

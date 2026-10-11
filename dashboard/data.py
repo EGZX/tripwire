@@ -30,7 +30,7 @@ def run_key(run: str) -> tuple[str, int]:
 SCORED_STATUSES = ("eligible", "weak downside", "data flag", "price above ceiling")
 # per-symbol fields tracked across runs
 TRACKED = ["price", "ceiling_px", "reasonable_px", "adverse_px", "entry_score", "status", "quote_ccy",
-           "implied_return", "hurdle", "adverse_score"]
+           "implied_return", "hurdle", "adverse_score", "stress_cover"]
 
 
 def _clean(v):
