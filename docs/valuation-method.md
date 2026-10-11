@@ -75,6 +75,15 @@ matching discount-rate claim.
 
 ## Forecasts, investment and capital calls
 
+Cash and investments beyond debt are separated from the operating business.
+The surplus (cash and short-term investments plus long-term investments, less
+debt, and at most working capital plus investments less long-term debt, so cash
+owed to customers such as merchant funds is not surplus) is valued at par at the
+opening date. It does not count as capital the business needs per unit of
+revenue, and the after-tax interest and equity-method income it earns leave
+operating earnings, so it is never counted twice. Unknown cash, debt or working
+capital separates nothing.
+
 The operating projection funds first-year expansion at the opening date and later
 expansion from the preceding period. Future equity investment per added revenue
 converges to the stated mature earning-power/return assumption. Contraction does

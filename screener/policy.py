@@ -42,6 +42,8 @@ class Policy:
     stress_floor: float = 0.5
     """A candidate's stress (adverse) value must cover at least this share of the market price; otherwise the
     status is 'weak downside'. 0 disables the floor."""
+    nonoperating_tax_rate: float = 0.25
+    """Tax on interest earned by surplus cash, removed from operating earnings when the cash is valued at par."""
     # ---- financial (common-equity) model
     franchise_share: float = 0.5
     """Share of today's excess return over the hurdle a mature franchise keeps (base case)."""

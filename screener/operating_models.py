@@ -171,6 +171,33 @@ def earnings_growths(estimates,income_date,last_fy_end):
     return ntm/ttm-1,e1/e0-1,f'consensus EPS growth, time-weighted ({w:.0%} current fiscal year); applied to reported clean income'
 
 
+def surplus_at(balance,income=None,period=None):
+    """Cash and investments beyond debt (carrying values) and the after-tax income they earn.
+
+    The surplus is valued at par and kept out of the operating business: it does not count as capital the
+    business needs per unit of revenue, and the interest and equity-method income it earns leave operating
+    earnings so nothing is counted twice. It cannot exceed working capital plus investments less long-term debt:
+    cash that is owed to customers (merchant funds, client balances) sits against current liabilities and is not
+    surplus. Unknown cash, debt or working capital separates nothing.
+    Returns (surplus, income, basis)."""
+    pick=lambda key:(S.latest(balance,key) if period is None else float((S.row(balance,key) if S.row(balance,key) is not None else pd.Series(dtype=float)).get(period,math.nan)))
+    cash,debt,investments=pick('cash'),pick('debt'),pick('lt_investments')
+    assets,liabilities,current_debt=pick('current_assets'),pick('current_liabilities'),pick('current_debt')
+    if not all(finite(x) for x in (cash,debt,assets,liabilities)):
+        return 0.0,0.0,'cash, debt or working capital unknown: no surplus separated'
+    investments=investments if finite(investments) and investments>0 else 0.0
+    gross=cash+investments
+    long_term_debt=debt-(current_debt if finite(current_debt) else 0.0)
+    surplus=max(0.0,min(gross-debt,assets-liabilities+investments-long_term_debt))
+    if surplus<=0:return 0.0,0.0,'no cash or investments beyond debt'
+    earned=0.0
+    if income is not None:
+        interest,associates=S.latest(income,'interest_income'),S.latest(income,'equity_income')
+        earned=(surplus/gross)*((interest if finite(interest) and interest>0 else 0.0)*(1-policy().nonoperating_tax_rate)
+                                +(associates if finite(associates) else 0.0))
+    return surplus,earned,'cash and investments less debt at carrying value; their after-tax income leaves operating earnings'
+
+
 def clean_margins(data,historical):
     """Annual clean common margins (continuing operations, before after-tax unusual items) and exclusions."""
     clean=S.clean_common_income(data.get('income_stmt'));out=[];excluded=[]
@@ -222,6 +249,11 @@ def build(data,selections,context):
     if finite(current_margin) and current_margin>policy().margin_limit:
         excluded_margins.append({'period':'TTM','margin':current_margin,'reason':'clean margin above 100% of revenue'})
         current_margin=math.nan
+    surplus,surplus_income,surplus_basis=surplus_at(bal,inc)
+    drag=surplus_income/revenue  # current ratio, applied to the margin record as an approximation
+    if drag:
+        margins=[m-drag for m in margins]
+        if finite(current_margin):current_margin-=drag
     ttm_is_annual=last_fy_end is not None and selections['income'].date==last_fy_end
     dependencies={}
     F.add_dependencies(dependencies,'income',{'revenue','net_income'},selections['income'].date,selections['income'].source)
@@ -251,8 +283,8 @@ def build(data,selections,context):
                     'industry reference: own record is not mostly profitable ('+str(len(annual_positive))+' of '+str(len(history_margins))+' fiscal years)')
     terminal=max(0.0,terminal) # zero is an explicit no-profitable-continuation endpoint
     equity=S.latest(bal,'common_equity')
-    intensity=_ratio(equity,revenue)
-    intensity_basis='current common book equity / revenue; marginal equity-capital proxy'
+    intensity=_ratio(equity-surplus,revenue) if finite(equity) else math.nan
+    intensity_basis='operating common equity (book less surplus cash and investments) / revenue; marginal equity-capital proxy'
     if not finite(intensity) or intensity<=0:
         turnover=ref['sales_to_invested_capital']
         if not finite(turnover) or turnover<=0:raise V.InvalidModel('neither usable capital history nor a positive industry capital reference')
@@ -263,7 +295,7 @@ def build(data,selections,context):
     intensity_observations=[]
     eq=S.annual(data.get('balance_sheet'),'common_equity')
     for d in eq.index.intersection(historical.index):
-        v=_ratio(eq[d],historical[d])
+        v=_ratio(eq[d]-surplus_at(data.get('balance_sheet'),period=d)[0],historical[d])
         if finite(v) and v>0:
             intensity_observations.append(v)
             F.add_dependencies(dependencies,'balance',F.book_dependencies(F.common_book_label(data.get('balance_sheet'),d)),d,'balance_sheet')
@@ -275,7 +307,7 @@ def build(data,selections,context):
     # Analysts' earnings path for years 1-2 (as growth rates on reported clean income), then a linear fade to
     # the terminal margin. Without it, a known earnings collapse or ramp would be invisible to the margin path.
     margin_path=None;earnings_basis='no usable EPS consensus'
-    base_income=clean_current if finite(clean_current) else observed_income
+    base_income=(clean_current if finite(clean_current) else observed_income)-surplus_income
     ge1,ge2,earnings_basis=earnings_growths(data.get('earnings_estimate'),selections['income'].date,last_fy_end)
     if ge1 is not None and finite(base_income) and base_income>0:
         r1=revenue*(1+g0);r2=r1*(1+next_growth)
@@ -304,7 +336,8 @@ def build(data,selections,context):
             'upside':rate+min(pol.upside_franchise_share*excess,pol.upside_franchise_cap)}
     def params(g,start,end,capital,g2=None,case='base'):
         return dict(revenue=revenue,growth=g,growth_path=growth_path(g,g if g2 is None else g2,gt,years),margin_start=start,
-                    margin_terminal=end,equity_to_sales=capital,terminal_equity_return=mature[case],terminal_growth=gt)
+                    margin_terminal=end,equity_to_sales=capital,terminal_equity_return=mature[case],terminal_growth=gt,
+                    surplus_assets=surplus)
     base=params(g0,margin_path[0] if margin_path else first_margin,terminal,intensity,next_growth)
     if margin_path:base['margin_path']=margin_path
     # Stress must lower value. Lower growth lowers value only when new equity earns more than the hurdle, so both
@@ -335,6 +368,7 @@ def build(data,selections,context):
                 {'parameter':'terminal_margin','value':terminal,'basis':terminal_basis},
                 {'parameter':'equity_to_sales','value':intensity,'basis':intensity_basis},
                 {'parameter':'terminal_equity_return','value':mature['base'],'basis':f"hurdle plus {pol.franchise_share:.0%} of today's excess return on equity ({current_return:.1%} vs {rate:.1%}), at most {pol.franchise_cap:.0%} points; stress: the hurdle"},
+                {'parameter':'surplus_assets','value':surplus,'basis':surplus_basis+f' (after-tax income removed: {surplus_income:,.0f})'},
                 {'parameter':'capital_structure','basis':'constant financing convention implicit in after-interest common earnings; no second debt/cash/lease subtraction'},
                 {'parameter':'scenario_envelope','basis':'observations and reference hypotheses, not confidence bounds or scenario probabilities'}],
             'warnings':warnings}
@@ -361,7 +395,10 @@ def project(p,years,rate,gt=None):
         if min(supplied)<=-1:raise V.InvalidModel('growth_path rates must exceed -100%')
         growths=list(supplied)+[gt];growth=growths[0]
     else:growths=V.fade(growth,gt,years)+[gt]
-    opening=-revenue*max(growth,0)*intensity
+    surplus=p.get('surplus_assets',0.0)
+    V.finite(surplus)
+    if surplus<0:raise V.InvalidModel('surplus assets cannot be negative')
+    opening=-revenue*max(growth,0)*intensity+surplus  # surplus cash at par funds first-year expansion first
     # Equity per added revenue moves from today's level towards the mature level (new equity earning the hurdle)
     # only by the policy share during the forecast; the terminal value always uses the mature level.
     capitals=V.fade(intensity,intensity+policy().capital_fade*(mature_intensity-intensity),years)+[mature_intensity]
@@ -382,4 +419,4 @@ def project(p,years,rate,gt=None):
     # Zero maturity profit is a finite-payout endpoint, not a fictional perpetuity.
     value=opening+V.discount(flows,terminal,rate,gt)
     return {'cashflows':tuple(flows),'terminal_cashflow':terminal,'terminal_growth':gt,'claim':'equity',
-            'opening_distribution':opening,'funding_required':-opening+sum(max(-x,0) for x in flows),'ledger':ledger,'value':value}
+            'opening_distribution':opening,'funding_required':max(0.0,-opening)+sum(max(-x,0) for x in flows),'ledger':ledger,'value':value}

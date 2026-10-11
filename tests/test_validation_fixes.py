@@ -279,3 +279,44 @@ def test_index_list_rows_are_given_listings_labeled_with_the_list(tmp_path):
     assert universe.load_index_list(tmp_path / "missing.csv", "x") == []
     both = universe.dedupe_by_symbol(rows + [universe.Entry(key="AOS", name="AOS", yahoo="AOS", lists={"Watchlist"})])
     assert next(e for e in both if e.yahoo == "AOS").lists == {"S&P 500", "Watchlist"}
+
+
+def test_surplus_cash_is_valued_at_par_and_not_charged_as_growth_capital():
+    from screener import operating_models as Om
+    base = operating()
+    for name in ("balance_sheet", "quarterly_balance_sheet"):
+        base[name].loc["Total Debt"] = [0.0] * len(base[name].columns)
+        base[name].loc["Cash Cash Equivalents And Short Term Investments"] = [0.0] * len(base[name].columns)
+        base[name].loc["Current Assets"] = [500.0] * len(base[name].columns)
+        base[name].loc["Current Liabilities"] = [300.0] * len(base[name].columns)
+    rich = operating()
+    for name in ("balance_sheet", "quarterly_balance_sheet"):
+        rich[name].loc["Total Debt"] = [0.0] * len(rich[name].columns)
+        rich[name].loc["Cash Cash Equivalents And Short Term Investments"] = [1500.0] * len(rich[name].columns)
+        rich[name].loc["Current Assets"] = [2000.0] * len(rich[name].columns)
+        rich[name].loc["Current Liabilities"] = [300.0] * len(rich[name].columns)
+        rich[name].loc["Stockholders Equity"] = rich[name].loc["Stockholders Equity"] + 1500.0
+        if "Common Stock Equity" in rich[name].index:
+            rich[name].loc["Common Stock Equity"] = rich[name].loc["Common Stock Equity"] + 1500.0
+    rich["ttm_income_stmt"].loc["Interest Income"] = [60.0]
+    plain, cash_rich = run(base), run(rich)
+    p0, p1 = (json.loads(m["scenario_parameters"])["base"] for m in (plain, cash_rich))
+    assert p1["surplus_assets"] == pytest.approx(1500.0)
+    assert p1["equity_to_sales"] == pytest.approx(p0["equity_to_sales"])      # the cash is not operating capital
+    assert p1["margin_start"] < p0["margin_start"]                             # its interest left operating earnings
+    # Value: the cash at par less the capitalised after-tax interest that was removed, never the cash twice.
+    assert p0["revenue"] and cash_rich["value_reasonable"] > plain["value_reasonable"]
+    assert cash_rich["value_reasonable"] < plain["value_reasonable"] + 1500.0 + 1e-6
+
+
+def test_surplus_needs_known_cash_and_debt():
+    from screener import operating_models as Om
+    bal = pd.DataFrame({pd.Timestamp("2025-12-31"): {"Cash Cash Equivalents And Short Term Investments": 100.0,
+                                                     "Current Assets": 150.0, "Current Liabilities": 40.0}})
+    assert Om.surplus_at(bal)[0] == 0.0                                        # debt unknown: nothing separated
+    bal.loc["Total Debt"] = [30.0]
+    bal.loc["Current Debt"] = [10.0]
+    bal.loc["Investments And Advances"] = [20.0]
+    assert Om.surplus_at(bal)[0] == pytest.approx(90.0)                        # cash + investments - debt
+    bal.loc["Current Liabilities"] = [140.0]                                   # e.g. merchant funds owed to customers
+    assert Om.surplus_at(bal)[0] == pytest.approx(150 - 140 + 20 - 20)         # working capital + investments - LT debt

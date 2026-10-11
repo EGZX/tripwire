@@ -52,6 +52,12 @@ ROWS.update({
     "discontinued_income": ["Net Income Discontinuous Operations"],
     "unusual": ["Total Unusual Items"],
     "unusual_tax": ["Tax Effect Of Unusual Items"],
+    "lt_investments": ["Investments And Advances", "Long Term Equity Investment"],
+    "current_assets": ["Current Assets"],
+    "current_liabilities": ["Current Liabilities"],
+    "current_debt": ["Current Debt And Capital Lease Obligation", "Current Debt"],
+    "interest_income": ["Interest Income", "Interest Income Non Operating"],
+    "equity_income": ["Earnings From Equity Interest Net Of Tax", "Earnings From Equity Interest"],
     "eps_diluted": ["Diluted EPS"],
 })
 

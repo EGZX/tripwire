@@ -51,7 +51,15 @@ ISSUANCE = ["ProceedsFromIssuanceOfCommonStock", "ProceedsFromStockOptionsExerci
 TOTAL_DEBT = ["LongTermDebt", "LongTermDebtAndCapitalLeaseObligations"]
 DEBT_PARTS = ["LongTermDebtNoncurrent", "LongTermDebtCurrent", "DebtCurrent", "ShortTermBorrowings", "CommercialPaper"]
 CASH = ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"]
-KEEP = set(REVENUE + INCOME + DISCONTINUED + EQUITY + DIVIDENDS + BUYBACKS + ISSUANCE + TOTAL_DEBT + DEBT_PARTS + CASH)
+SHORT_INVESTMENTS = ["ShortTermInvestments", "MarketableSecuritiesCurrent", "AvailableForSaleSecuritiesDebtSecuritiesCurrent"]
+LONG_INVESTMENTS = ["LongTermInvestments", "MarketableSecuritiesNoncurrent", "AvailableForSaleSecuritiesDebtSecuritiesNoncurrent",
+                    "EquityMethodInvestments"]
+INTEREST_INCOME = ["InvestmentIncomeInterest", "InvestmentIncomeInterestAndDividend"]
+ASSOCIATES = ["IncomeLossFromEquityMethodInvestments"]
+CURRENT = {"current_assets": ["AssetsCurrent"], "current_liabilities": ["LiabilitiesCurrent"],
+           "current_debt": ["LongTermDebtCurrent", "DebtCurrent"]}
+KEEP = set(REVENUE + INCOME + DISCONTINUED + EQUITY + DIVIDENDS + BUYBACKS + ISSUANCE + TOTAL_DEBT + DEBT_PARTS + CASH
+           + SHORT_INVESTMENTS + LONG_INVESTMENTS + INTEREST_INCOME + ASSOCIATES + sum(CURRENT.values(), []))
 FACTS_VERSION = hashlib.sha1(",".join(sorted(KEEP)).encode()).hexdigest()[:8]  # cache follows the concept list
 # SIC ranges: finance, insurance and real estate use other models; these use the cyclical family.
 FINANCIAL = range(6000, 6800)
@@ -64,12 +72,17 @@ def sec(url: str, path: Path, extract=None):
     if path.exists():
         with gzip.open(path, "rt", encoding="utf-8") as fh:
             return json.load(fh)
-    for attempt in range(5):
+    for attempt in range(8):
         wait = 0.12 - (time.time() - _last_call[0])  # SEC fair access: at most 10 requests per second
         if wait > 0:
             time.sleep(wait)
         _last_call[0] = time.time()
-        r = requests.get(url, headers={"User-Agent": AGENT, "Accept-Encoding": "gzip"}, timeout=60)
+        try:
+            r = requests.get(url, headers={"User-Agent": AGENT, "Accept-Encoding": "gzip"}, timeout=60)
+        except requests.RequestException as exc:  # network or DNS outage: back off and retry, up to ~4 minutes
+            print(f"  SEC request failed ({type(exc).__name__}); retry {attempt + 1}/8", flush=True)
+            time.sleep(min(2 ** attempt, 120))
+            continue
         if r.status_code == 404:
             payload = None
             break
@@ -193,11 +206,39 @@ def inputs(payload: dict, known: date, used: dict) -> dict | None:
             "Net Income Common Stockholders": {e: income[e] for e in ends if e in income},
             "Net Income Discontinuous Operations": {e: disc[e] for e in ends if e in disc}}
     inc = pd.DataFrame.from_dict(rows, orient="index").reindex(columns=sorted(ends, reverse=True))
-    bal = pd.DataFrame.from_dict({"Common Stock Equity": {e: equity[e] for e in ends if e in equity}},
-                                 orient="index").reindex(columns=sorted(ends, reverse=True))
+    interest = annual(payload, INTEREST_INCOME, known=known)
+    associates = annual(payload, ASSOCIATES, known=known)
+    rows["Interest Income"] = {e: interest[e] for e in ends if e in interest}
+    rows["Earnings From Equity Interest"] = {e: associates[e] for e in ends if e in associates}
+    inc = pd.DataFrame.from_dict(rows, orient="index").reindex(columns=sorted(ends, reverse=True))
+    items = {e: balance_items(payload, e, known=known) for e in ends}
+    balance = {"Common Stock Equity": {e: equity[e] for e in ends if e in equity},
+               "Total Debt": {e: v["debt"] for e, v in items.items() if math.isfinite(v["debt"])},
+               "Cash Cash Equivalents And Short Term Investments": {e: v["cash"] for e, v in items.items() if math.isfinite(v["cash"])},
+               "Investments And Advances": {e: v["investments"] for e, v in items.items() if math.isfinite(v["investments"])},
+               "Current Assets": {e: v["current_assets"] for e, v in items.items() if math.isfinite(v["current_assets"])},
+               "Current Liabilities": {e: v["current_liabilities"] for e, v in items.items() if math.isfinite(v["current_liabilities"])},
+               "Current Debt": {e: v["current_debt"] for e, v in items.items() if math.isfinite(v["current_debt"])}}
+    bal = pd.DataFrame.from_dict(balance, orient="index").reindex(columns=sorted(ends, reverse=True))
     if ends[-1] not in income or ends[-1] not in equity:
         return None
     return {"income_stmt": inc, "balance_sheet": bal, "info": {"financialCurrency": "USD", "industry": ""}}
+
+
+def balance_items(payload: dict, end: pd.Timestamp, known: date | None = None, first=False) -> dict:
+    """Debt, cash plus short-term investments, and long-term investments at a fiscal year end (NaN if unknown)."""
+    at = lambda concepts: annual(payload, concepts, instant=True, known=known, first=first).get(end, math.nan)
+    debt = at(TOTAL_DEBT)
+    if not math.isfinite(debt):
+        parts = [at([c]) for c in ("LongTermDebtNoncurrent", "LongTermDebtCurrent")]
+        if not any(math.isfinite(x) for x in parts):
+            parts = [at(["LongTermDebtNoncurrent"]), at(["DebtCurrent"])]
+        debt = sum(x for x in parts if math.isfinite(x)) if any(math.isfinite(x) for x in parts) else math.nan
+    else:
+        debt += sum(x for x in (at(["ShortTermBorrowings"]), at(["CommercialPaper"])) if math.isfinite(x))
+    cash, short = at(CASH), at(SHORT_INVESTMENTS)
+    cash = (cash if math.isfinite(cash) else 0.0) + (short if math.isfinite(short) else 0.0) if math.isfinite(cash) else math.nan
+    return {"debt": debt, "cash": cash, "investments": at(LONG_INVESTMENTS), **{k: at(v) for k, v in CURRENT.items()}}
 
 
 def net_debt(payload: dict, end: pd.Timestamp, known: date) -> float:
@@ -219,7 +260,8 @@ def outcomes(payload: dict, start: pd.Timestamp, years: int, used: dict) -> dict
     """Reported results for forecast years 1..years: fiscal years ending ~t years after the last known one."""
     series = {name: annual(payload, concepts, instant=name == "equity", first=True) for name, concepts in
               (("revenue", used["revenue"]), ("income", used["income"]), ("discontinued", DISCONTINUED), ("equity", used["equity"]),
-               ("dividends", DIVIDENDS), ("buybacks", BUYBACKS), ("issuance", ISSUANCE))}
+               ("dividends", DIVIDENDS), ("buybacks", BUYBACKS), ("issuance", ISSUANCE),
+               ("interest", INTEREST_INCOME), ("associates", ASSOCIATES))}
     out = {}
     for t in range(0, years + 1):
         target = start + pd.DateOffset(years=t)
@@ -230,6 +272,16 @@ def outcomes(payload: dict, start: pd.Timestamp, years: int, used: dict) -> dict
                 row[name] = s[min(near, key=lambda e: abs((e - target).days))]
         if "revenue" in row and "income" in row:
             row["clean_income"] = row["income"] - row.get("discontinued", 0.0)
+            ends = [e for e in series["equity"] if abs((e - target).days) <= 50]
+            if ends:
+                b = balance_items(payload, min(ends, key=lambda e: abs((e - target).days)), first=True)
+                if all(math.isfinite(b[k]) for k in ("debt", "cash", "current_assets", "current_liabilities")):
+                    investments = b["investments"] if math.isfinite(b["investments"]) and b["investments"] > 0 else 0.0
+                    gross = b["cash"] + investments
+                    long_debt = b["debt"] - (b["current_debt"] if math.isfinite(b["current_debt"]) else 0.0)
+                    row["surplus"] = max(0.0, min(gross - b["debt"], b["current_assets"] - b["current_liabilities"] + investments - long_debt))
+                    share = row["surplus"] / gross if gross > 0 else 0.0
+                    row["surplus_income"] = share * (max(row.get("interest", 0.0), 0.0) * (1 - 0.25) + row.get("associates", 0.0))
             out[t] = row
     return out
 
@@ -278,7 +330,7 @@ def run_firm(cik: int, cohort: int, cfg: dict, years: int):
                 g0=plan["base"]["growth"], margin0=plan["base"]["margin_start"], margin_t=plan["base"]["margin_terminal"],
                 intensity=plan["base"]["equity_to_sales"], revenue0=actual[0]["revenue"], income0=actual[0]["clean_income"],
                 equity0=actual[0].get("equity"), years_observed=max(actual),
-                net_debt0=net_debt(payload, last, known))
+                net_debt0=net_debt(payload, last, known), surplus0=plan["base"].get("surplus_assets", 0.0))
     rows = []
     equity = actual[0].get("equity")
     for f in base["ledger"]:
@@ -288,6 +340,7 @@ def run_firm(cik: int, cohort: int, cfg: dict, years: int):
                    f_investment=f["new_equity_investment"], f_distribution=f["net_distribution"])
         if a:
             row.update(a_revenue=a["revenue"], a_income=a["clean_income"], a_equity=a.get("equity"),
+                       a_surplus=a.get("surplus"), a_surplus_income=a.get("surplus_income"),
                        a_cash_distribution=a.get("dividends", 0.0) + a.get("buybacks", 0.0) - a.get("issuance", 0.0))
             if a.get("equity") is not None and equity is not None:
                 row["a_distribution"] = a["income"] - (a["equity"] - equity)  # clean surplus: earnings less equity retained
@@ -333,6 +386,19 @@ def summarise(firms: pd.DataFrame, fy: pd.DataFrame, skipped: dict, years: int) 
               f"- Model: change in forecast earnings / forecast equity invested = "
               f"**{(f_end.f_income - s.income0).sum() / f_cum_invest.sum():.1%}**",
               f"- Hurdle used: {firms.hurdle.median():.2%} (10y Treasury {firms.rf.median():.2%} at the cohort dates)"]
+    # Capital needed per added revenue: book equity vs operating equity (book less surplus cash and investments).
+    e10 = fy[fy.year == h].set_index(["cik", "cohort"]).reindex(common)
+    s0 = start.loc[common]
+    grew = (e10.a_revenue - s0.revenue0) > 0
+    d_rev = (e10.a_revenue - s0.revenue0)[grew].sum()
+    if "a_surplus" in e10 and "surplus0" in s0:
+        ok = grew & e10.a_surplus.notna()
+        op_add = ((e10.a_equity - e10.a_surplus) - (s0.equity0 - s0.surplus0.fillna(0)))[ok].sum() / (e10.a_revenue - s0.revenue0)[ok].sum()
+        lines += ["", "## Capital needed per added revenue", "",
+                  f"- Actual operating equity added per added revenue: **{op_add:.2f}** "
+                  f"(book equity: {(e10.a_equity - s0.equity0)[grew].sum() / d_rev:.2f})",
+                  f"- Model's starting operating equity per revenue (median): {s0.intensity[grew].median():.2f}; "
+                  f"book equity per revenue: {(s0.equity0 / s0.revenue0)[grew].median():.2f}"]
     # Value under realized fundamentals vs model value, discounted at the model's own hurdle.
     vals = []
     for (cik, cohort), g in fy.groupby(["cik", "cohort"]):
@@ -344,9 +410,16 @@ def summarise(firms: pd.DataFrame, fy: pd.DataFrame, skipped: dict, years: int) 
         pv_a = sum(x * w for x, w in zip(g.a_distribution, disc))
         last = g[g.year == years].iloc[0]
         tv = m.value - m.opening - pv_f                 # model terminal PV
-        scale = last.a_income / last.f_income if last.f_income > 0 else math.nan
+        surplus0 = m.get("surplus0", 0.0) if "surplus0" in m else 0.0
+        surplus0 = surplus0 if surplus0 == surplus0 else 0.0
+        operating = last.a_income - (last.get("a_surplus_income", 0.0) if last.get("a_surplus_income") == last.get("a_surplus_income") else 0.0)
+        scale = operating / last.f_income if last.f_income > 0 else math.nan
+        surplus10 = last.get("a_surplus", math.nan)
+        # The model distributes the surplus at par at the start; in reality it stays and is still there in year 10.
+        pv_a += (surplus10 if surplus10 == surplus10 else 0.0) * (1 + m.hurdle) ** -years
+        pv_f += surplus0
         vals.append(dict(value=m.value, pv_f=pv_f, pv_a=pv_a, tv=tv, tv_a=tv * scale if scale == scale else math.nan, g0=m.g0,
-                         stress=m.stress_value, opening=m.opening, equity0=m.equity0,
+                         stress=m.stress_value, opening=m.opening, equity0=m.equity0, surplus0=surplus0,
                          net_debt0=m.get("net_debt0", math.nan)))
     v = pd.DataFrame(vals).dropna(subset=["pv_f", "pv_a", "tv", "tv_a"])
     v = v[(v.pv_f + v.tv) > 0]
@@ -357,7 +430,7 @@ def summarise(firms: pd.DataFrame, fy: pd.DataFrame, skipped: dict, years: int) 
         for name, d in v.groupby("bucket", observed=True):
             by.append(f"| {name} | {len(d)} | {(d.pv_a.sum() + d.tv_a.sum()) / (d.pv_f.sum() + d.tv.sum()):.2f} | {d.ratio.median():.2f} |")
         # Stress case: how often did the realized value fall below the model's stress value?
-        realized = v.opening + v.pv_a + v.tv_a
+        realized = v.opening - v.surplus0 + v.pv_a + v.tv_a  # pv_a already holds the surplus
         by += ["", "| Starting growth | Realized below stress value | Realized below half the base value |", "|---|---|---|"]
         for name, d in v.assign(realized=realized).groupby("bucket", observed=True):
             by.append(f"| {name} | {(d.realized < d.stress).mean():.0%} | {(d.realized < 0.5 * d.value).mean():.0%} |")
