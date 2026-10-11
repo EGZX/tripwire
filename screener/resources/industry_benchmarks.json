@@ -1,0 +1,633 @@
+{
+  "as_of": "2026-01",
+  "as_of_precision": "month",
+  "geography": "United States",
+  "industries": {
+    "Advertising": {
+      "firms": 52,
+      "net_margin": -0.003,
+      "operating_margin": 0.1007,
+      "sales_to_invested_capital": 3.85
+    },
+    "Aerospace/Defense": {
+      "firms": 79,
+      "net_margin": 0.0499,
+      "operating_margin": 0.08650000000000001,
+      "sales_to_invested_capital": 2.74
+    },
+    "Air Transport": {
+      "firms": 23,
+      "net_margin": 0.025099999999999997,
+      "operating_margin": 0.053200000000000004,
+      "sales_to_invested_capital": 1.8
+    },
+    "Apparel": {
+      "firms": 35,
+      "net_margin": 0.0385,
+      "operating_margin": 0.0911,
+      "sales_to_invested_capital": 1.77
+    },
+    "Auto & Truck": {
+      "firms": 33,
+      "net_margin": 0.0129,
+      "operating_margin": 0.0232,
+      "sales_to_invested_capital": 1.08
+    },
+    "Auto Parts": {
+      "firms": 35,
+      "net_margin": 0.0072,
+      "operating_margin": 0.0567,
+      "sales_to_invested_capital": 2.39
+    },
+    "Bank (Money Center)": {
+      "firms": 15,
+      "net_margin": 0.2889,
+      "operating_margin": 0.0,
+      "sales_to_invested_capital": 0.19
+    },
+    "Banks (Regional)": {
+      "firms": 568,
+      "net_margin": 0.2749,
+      "operating_margin": 0.0,
+      "sales_to_invested_capital": 0.33
+    },
+    "Beverage (Alcoholic)": {
+      "firms": 14,
+      "net_margin": 0.005600000000000001,
+      "operating_margin": 0.22760000000000002,
+      "sales_to_invested_capital": 0.79
+    },
+    "Beverage (Soft)": {
+      "firms": 27,
+      "net_margin": 0.134,
+      "operating_margin": 0.2053,
+      "sales_to_invested_capital": 1.54
+    },
+    "Broadcasting": {
+      "firms": 24,
+      "net_margin": 0.0206,
+      "operating_margin": 0.1233,
+      "sales_to_invested_capital": 1.28
+    },
+    "Brokerage & Investment Banking": {
+      "firms": 32,
+      "net_margin": 0.1445,
+      "operating_margin": 0.0,
+      "sales_to_invested_capital": 0.27
+    },
+    "Building Materials": {
+      "firms": 41,
+      "net_margin": 0.0742,
+      "operating_margin": 0.1264,
+      "sales_to_invested_capital": 2.06
+    },
+    "Business & Consumer Services": {
+      "firms": 155,
+      "net_margin": 0.0703,
+      "operating_margin": 0.12269999999999999,
+      "sales_to_invested_capital": 2.8
+    },
+    "Cable TV": {
+      "firms": 9,
+      "net_margin": 0.0708,
+      "operating_margin": 0.18489999999999998,
+      "sales_to_invested_capital": 0.74
+    },
+    "Chemical (Basic)": {
+      "firms": 29,
+      "net_margin": -0.0373,
+      "operating_margin": 0.026699999999999998,
+      "sales_to_invested_capital": 1.49
+    },
+    "Chemical (Diversified)": {
+      "firms": 4,
+      "net_margin": -0.0535,
+      "operating_margin": 0.0329,
+      "sales_to_invested_capital": 1.27
+    },
+    "Chemical (Specialty)": {
+      "firms": 59,
+      "net_margin": 0.0291,
+      "operating_margin": 0.1217,
+      "sales_to_invested_capital": 1.11
+    },
+    "Coal & Related Energy": {
+      "firms": 16,
+      "net_margin": -0.0213,
+      "operating_margin": -0.04019999999999999,
+      "sales_to_invested_capital": 1.29
+    },
+    "Computer Services": {
+      "firms": 64,
+      "net_margin": 0.044500000000000005,
+      "operating_margin": 0.0741,
+      "sales_to_invested_capital": 5.19
+    },
+    "Computers/Peripherals": {
+      "firms": 36,
+      "net_margin": 0.1778,
+      "operating_margin": 0.2248,
+      "sales_to_invested_capital": 3.62
+    },
+    "Construction Supplies": {
+      "firms": 40,
+      "net_margin": 0.10779999999999999,
+      "operating_margin": 0.1523,
+      "sales_to_invested_capital": 1.45
+    },
+    "Diversified": {
+      "firms": 20,
+      "net_margin": 0.1637,
+      "operating_margin": 0.2273,
+      "sales_to_invested_capital": 0.68
+    },
+    "Drugs (Biotechnology)": {
+      "firms": 496,
+      "net_margin": -0.05,
+      "operating_margin": 0.0897,
+      "sales_to_invested_capital": 0.82
+    },
+    "Drugs (Pharmaceutical)": {
+      "firms": 228,
+      "net_margin": 0.18539999999999998,
+      "operating_margin": 0.2954,
+      "sales_to_invested_capital": 1.11
+    },
+    "Education": {
+      "firms": 32,
+      "net_margin": 0.08789999999999999,
+      "operating_margin": 0.1401,
+      "sales_to_invested_capital": 1.63
+    },
+    "Electrical Equipment": {
+      "firms": 112,
+      "net_margin": 0.009399999999999999,
+      "operating_margin": 0.0953,
+      "sales_to_invested_capital": 2.03
+    },
+    "Electronics (Consumer & Office)": {
+      "firms": 8,
+      "net_margin": -0.0942,
+      "operating_margin": -0.0449,
+      "sales_to_invested_capital": 5.57
+    },
+    "Electronics (General)": {
+      "firms": 114,
+      "net_margin": 0.0647,
+      "operating_margin": 0.1042,
+      "sales_to_invested_capital": 2.38
+    },
+    "Engineering/Construction": {
+      "firms": 48,
+      "net_margin": 0.0594,
+      "operating_margin": 0.0649,
+      "sales_to_invested_capital": 4.36
+    },
+    "Entertainment": {
+      "firms": 92,
+      "net_margin": 0.0443,
+      "operating_margin": 0.106,
+      "sales_to_invested_capital": 1.39
+    },
+    "Environmental & Waste Services": {
+      "firms": 53,
+      "net_margin": 0.0824,
+      "operating_margin": 0.1461,
+      "sales_to_invested_capital": 2.3
+    },
+    "Farming/Agriculture": {
+      "firms": 35,
+      "net_margin": 0.0391,
+      "operating_margin": 0.0545,
+      "sales_to_invested_capital": 1.48
+    },
+    "Financial Svcs. (Non-bank & Insurance)": {
+      "firms": 176,
+      "net_margin": 0.22190000000000001,
+      "operating_margin": 0.1848,
+      "sales_to_invested_capital": 0.07
+    },
+    "Food Processing": {
+      "firms": 78,
+      "net_margin": 0.0282,
+      "operating_margin": 0.1063,
+      "sales_to_invested_capital": 1.71
+    },
+    "Food Wholesalers": {
+      "firms": 13,
+      "net_margin": 0.011699999999999999,
+      "operating_margin": 0.026099999999999998,
+      "sales_to_invested_capital": 7.71
+    },
+    "Furn/Home Furnishings": {
+      "firms": 27,
+      "net_margin": 0.011000000000000001,
+      "operating_margin": 0.0659,
+      "sales_to_invested_capital": 1.96
+    },
+    "Green & Renewable Energy": {
+      "firms": 15,
+      "net_margin": -0.10830000000000001,
+      "operating_margin": 0.19870000000000002,
+      "sales_to_invested_capital": 0.2
+    },
+    "Healthcare Products": {
+      "firms": 204,
+      "net_margin": 0.09609999999999999,
+      "operating_margin": 0.1534,
+      "sales_to_invested_capital": 1.48
+    },
+    "Healthcare Support Services": {
+      "firms": 104,
+      "net_margin": 0.0125,
+      "operating_margin": 0.03,
+      "sales_to_invested_capital": 11.75
+    },
+    "Heathcare Information and Technology": {
+      "firms": 115,
+      "net_margin": 0.0745,
+      "operating_margin": 0.1471,
+      "sales_to_invested_capital": 1.25
+    },
+    "Homebuilding": {
+      "firms": 30,
+      "net_margin": 0.0947,
+      "operating_margin": 0.1257,
+      "sales_to_invested_capital": 1.42
+    },
+    "Hospitals/Healthcare Facilities": {
+      "firms": 31,
+      "net_margin": 0.063,
+      "operating_margin": 0.1336,
+      "sales_to_invested_capital": 1.95
+    },
+    "Hotel/Gaming": {
+      "firms": 63,
+      "net_margin": 0.1038,
+      "operating_margin": 0.19390000000000002,
+      "sales_to_invested_capital": 1.04
+    },
+    "Household Products": {
+      "firms": 110,
+      "net_margin": 0.1168,
+      "operating_margin": 0.1862,
+      "sales_to_invested_capital": 2.21
+    },
+    "Information Services": {
+      "firms": 15,
+      "net_margin": 0.0653,
+      "operating_margin": 0.1189,
+      "sales_to_invested_capital": 2.51
+    },
+    "Insurance (General)": {
+      "firms": 21,
+      "net_margin": 0.12369999999999999,
+      "operating_margin": 0.21309999999999998,
+      "sales_to_invested_capital": 2.41
+    },
+    "Insurance (Life)": {
+      "firms": 20,
+      "net_margin": 0.078,
+      "operating_margin": 0.1061,
+      "sales_to_invested_capital": 1.19
+    },
+    "Insurance (Prop/Cas.)": {
+      "firms": 57,
+      "net_margin": 0.11130000000000001,
+      "operating_margin": 0.1525,
+      "sales_to_invested_capital": 1.48
+    },
+    "Investments & Asset Management": {
+      "firms": 283,
+      "net_margin": 0.18359999999999999,
+      "operating_margin": 0.255,
+      "sales_to_invested_capital": 0.59
+    },
+    "Machinery": {
+      "firms": 105,
+      "net_margin": 0.1058,
+      "operating_margin": 0.1586,
+      "sales_to_invested_capital": 1.95
+    },
+    "Metals & Mining": {
+      "firms": 73,
+      "net_margin": 0.1052,
+      "operating_margin": 0.23850000000000002,
+      "sales_to_invested_capital": 1.18
+    },
+    "Office Equipment & Services": {
+      "firms": 14,
+      "net_margin": 0.0438,
+      "operating_margin": 0.1073,
+      "sales_to_invested_capital": 2.21
+    },
+    "Oil/Gas (Integrated)": {
+      "firms": 4,
+      "net_margin": 0.083,
+      "operating_margin": 0.1125,
+      "sales_to_invested_capital": 1.02
+    },
+    "Oil/Gas (Production and Exploration)": {
+      "firms": 142,
+      "net_margin": 0.1463,
+      "operating_margin": 0.25420000000000004,
+      "sales_to_invested_capital": 0.57
+    },
+    "Oil/Gas Distribution": {
+      "firms": 23,
+      "net_margin": 0.1335,
+      "operating_margin": 0.25780000000000003,
+      "sales_to_invested_capital": 0.52
+    },
+    "Oilfield Svcs/Equip.": {
+      "firms": 97,
+      "net_margin": 0.023399999999999997,
+      "operating_margin": 0.04650000000000001,
+      "sales_to_invested_capital": 2.79
+    },
+    "Packaging & Container": {
+      "firms": 19,
+      "net_margin": 0.044800000000000006,
+      "operating_margin": 0.0958,
+      "sales_to_invested_capital": 1.84
+    },
+    "Paper/Forest Products": {
+      "firms": 6,
+      "net_margin": 0.0344,
+      "operating_margin": 0.0634,
+      "sales_to_invested_capital": 1.73
+    },
+    "Power": {
+      "firms": 46,
+      "net_margin": 0.1273,
+      "operating_margin": 0.2147,
+      "sales_to_invested_capital": 0.37
+    },
+    "Precious Metals": {
+      "firms": 56,
+      "net_margin": 0.2859,
+      "operating_margin": 0.4039,
+      "sales_to_invested_capital": 0.68
+    },
+    "Publishing & Newspapers": {
+      "firms": 19,
+      "net_margin": 0.0819,
+      "operating_margin": 0.0998,
+      "sales_to_invested_capital": 2.16
+    },
+    "R.E.I.T.": {
+      "firms": 190,
+      "net_margin": 0.1323,
+      "operating_margin": 0.2464,
+      "sales_to_invested_capital": 0.15
+    },
+    "Real Estate (Development)": {
+      "firms": 14,
+      "net_margin": 0.0701,
+      "operating_margin": 0.21530000000000002,
+      "sales_to_invested_capital": 0.35
+    },
+    "Real Estate (General/Diversified)": {
+      "firms": 12,
+      "net_margin": 0.2377,
+      "operating_margin": 0.2145,
+      "sales_to_invested_capital": 0.25
+    },
+    "Real Estate (Operations & Services)": {
+      "firms": 54,
+      "net_margin": 0.011899999999999999,
+      "operating_margin": 0.0285,
+      "sales_to_invested_capital": 2.52
+    },
+    "Recreation": {
+      "firms": 49,
+      "net_margin": -0.0472,
+      "operating_margin": 0.0969,
+      "sales_to_invested_capital": 1.24
+    },
+    "Reinsurance": {
+      "firms": 1,
+      "net_margin": 0.038900000000000004,
+      "operating_margin": 0.0721,
+      "sales_to_invested_capital": 2.01
+    },
+    "Restaurant/Dining": {
+      "firms": 64,
+      "net_margin": 0.09369999999999999,
+      "operating_margin": 0.15789999999999998,
+      "sales_to_invested_capital": 1.51
+    },
+    "Retail (Automotive)": {
+      "firms": 34,
+      "net_margin": 0.0336,
+      "operating_margin": 0.062400000000000004,
+      "sales_to_invested_capital": 2.34
+    },
+    "Retail (Building Supply)": {
+      "firms": 14,
+      "net_margin": 0.0784,
+      "operating_margin": 0.11939999999999999,
+      "sales_to_invested_capital": 3.41
+    },
+    "Retail (Distributors)": {
+      "firms": 62,
+      "net_margin": 0.0605,
+      "operating_margin": 0.10099999999999999,
+      "sales_to_invested_capital": 1.83
+    },
+    "Retail (General)": {
+      "firms": 23,
+      "net_margin": 0.056100000000000004,
+      "operating_margin": 0.068,
+      "sales_to_invested_capital": 3.51
+    },
+    "Retail (Grocery and Food)": {
+      "firms": 15,
+      "net_margin": 0.0132,
+      "operating_margin": 0.0229,
+      "sales_to_invested_capital": 4.65
+    },
+    "Retail (REITs)": {
+      "firms": 26,
+      "net_margin": 0.23,
+      "operating_margin": 0.4025,
+      "sales_to_invested_capital": 0.14
+    },
+    "Retail (Special Lines)": {
+      "firms": 94,
+      "net_margin": 0.0519,
+      "operating_margin": 0.07730000000000001,
+      "sales_to_invested_capital": 2.99
+    },
+    "Rubber& Tires": {
+      "firms": 3,
+      "net_margin": -0.0949,
+      "operating_margin": 0.022400000000000003,
+      "sales_to_invested_capital": 1.39
+    },
+    "Semiconductor": {
+      "firms": 66,
+      "net_margin": 0.3045,
+      "operating_margin": 0.3533,
+      "sales_to_invested_capital": 1.21
+    },
+    "Semiconductor Equip": {
+      "firms": 31,
+      "net_margin": 0.2132,
+      "operating_margin": 0.26170000000000004,
+      "sales_to_invested_capital": 1.85
+    },
+    "Shipbuilding & Marine": {
+      "firms": 8,
+      "net_margin": 0.09480000000000001,
+      "operating_margin": 0.126,
+      "sales_to_invested_capital": 0.94
+    },
+    "Shoe": {
+      "firms": 11,
+      "net_margin": 0.06269999999999999,
+      "operating_margin": 0.09029999999999999,
+      "sales_to_invested_capital": 2.62
+    },
+    "Software (Entertainment)": {
+      "firms": 77,
+      "net_margin": 0.2993,
+      "operating_margin": 0.3385,
+      "sales_to_invested_capital": 1.34
+    },
+    "Software (Internet)": {
+      "firms": 29,
+      "net_margin": -0.009300000000000001,
+      "operating_margin": 0.0369,
+      "sales_to_invested_capital": 1.35
+    },
+    "Software (System & Application)": {
+      "firms": 309,
+      "net_margin": 0.25489999999999996,
+      "operating_margin": 0.3298,
+      "sales_to_invested_capital": 1.54
+    },
+    "Steel": {
+      "firms": 19,
+      "net_margin": 0.019299999999999998,
+      "operating_margin": 0.040999999999999995,
+      "sales_to_invested_capital": 1.8
+    },
+    "Telecom (Wireless)": {
+      "firms": 12,
+      "net_margin": 0.12240000000000001,
+      "operating_margin": 0.20980000000000001,
+      "sales_to_invested_capital": 0.55
+    },
+    "Telecom. Equipment": {
+      "firms": 57,
+      "net_margin": 0.1609,
+      "operating_margin": 0.207,
+      "sales_to_invested_capital": 2.57
+    },
+    "Telecom. Services": {
+      "firms": 39,
+      "net_margin": 0.142,
+      "operating_margin": 0.2047,
+      "sales_to_invested_capital": 0.6
+    },
+    "Tobacco": {
+      "firms": 10,
+      "net_margin": 0.26649999999999996,
+      "operating_margin": 0.4354,
+      "sales_to_invested_capital": 1.82
+    },
+    "Total Market": {
+      "firms": 5994,
+      "net_margin": 0.0974,
+      "operating_margin": 0.1282,
+      "sales_to_invested_capital": 0.82
+    },
+    "Total Market (without financials)": {
+      "firms": 4822,
+      "net_margin": 0.08560000000000001,
+      "operating_margin": 0.13140000000000002,
+      "sales_to_invested_capital": 1.43
+    },
+    "Transportation": {
+      "firms": 19,
+      "net_margin": 0.0823,
+      "operating_margin": 0.0757,
+      "sales_to_invested_capital": 1.98
+    },
+    "Transportation (Railroads)": {
+      "firms": 4,
+      "net_margin": 0.2473,
+      "operating_margin": 0.3741,
+      "sales_to_invested_capital": 0.46
+    },
+    "Trucking": {
+      "firms": 26,
+      "net_margin": 0.0379,
+      "operating_margin": 0.0689,
+      "sales_to_invested_capital": 1.47
+    },
+    "Utility (General)": {
+      "firms": 14,
+      "net_margin": 0.1418,
+      "operating_margin": 0.2349,
+      "sales_to_invested_capital": 0.3
+    },
+    "Utility (Water)": {
+      "firms": 14,
+      "net_margin": 0.2116,
+      "operating_margin": 0.3372,
+      "sales_to_invested_capital": 0.24
+    }
+  },
+  "observation_period": "2026-01",
+  "retrieval_timezone": "UTC",
+  "retrieved_at": "2026-10-11T00:35:35.503758+00:00",
+  "retrieved_on": "2026-10-11",
+  "schema_version": 1,
+  "sources": [
+    {
+      "columns": {
+        "firms": "Number of firms",
+        "industry": "Industry Name",
+        "net_margin": "Net Margin",
+        "operating_margin": "Pre-tax Unadjusted Operating Margin"
+      },
+      "dataset": "margin",
+      "observation_period": "2026-01",
+      "observation_precision": "month",
+      "retrieval_mode": "local preserved HTML",
+      "retrieved_at": "2026-10-11T00:35:35.503758+00:00",
+      "sha256": "56c79e830dff33433c1ee66cea14ab2156d465a8de349d734f40235899bf1090",
+      "url": "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/margin.html"
+    },
+    {
+      "columns": {
+        "firms": "Number of Firms",
+        "industry": "Industry Name",
+        "sales_to_invested_capital": "Sales/ Invested Capital (LTM)"
+      },
+      "dataset": "capex",
+      "observation_period": "2026-01",
+      "observation_precision": "month",
+      "retrieval_mode": "local preserved HTML",
+      "retrieved_at": "2026-10-11T00:35:35.503758+00:00",
+      "sha256": "713eaa7f0f99997d9e3fa60249adc3547cc0934929f4a875ec94869c17806209",
+      "url": "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/capex.html"
+    }
+  ],
+  "units": {
+    "firms": "count",
+    "net_margin": "fraction",
+    "operating_margin": "pre-tax unadjusted fraction",
+    "sales_to_invested_capital": "dimensionless sales / invested capital (LTM)"
+  },
+  "unusable_industries": {},
+  "usage": "Industry reference for explicit scenario assumptions; not a company forecast or GICS classification.",
+  "validation": {
+    "matched_industries": 96,
+    "population_join": "exact names and firm counts",
+    "unusable_industries": 0,
+    "usable_industries": 96
+  }
+}

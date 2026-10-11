@@ -90,9 +90,11 @@ def test_bank_model_integrates_without_requiring_ebit_or_debt():
     assert m['value_at_policy_hurdle']==pytest.approx(10/.095)
     assert m['model']=='bank_capital' and m['implied_return_claim']=='equity'
 
-def test_missing_provider_classification_requires_a_sourced_family():
+def test_missing_provider_classification_uses_general_economics_and_accepts_sourced_family():
     d=operating();d['info']['industry']=''
-    assert 'business classification unavailable' in run(d)['not_rankable']
+    automatic=run(d)
+    assert automatic['not_rankable']=='' and automatic['model']=='operating_equity'
+    assert 'provider' in automatic['business_profile']
     p=capital_params();p['terminal_growth']=0
     source=issuer('bank_capital',p);source['model_family']='bank'
     m=run(d,{**CFG,'issuer_inputs':{'TEST':source}})
@@ -108,7 +110,8 @@ def test_broker_can_use_equity_capital_distributions_without_a_firm_debt_bridge(
 def test_mortgage_reit_cannot_inherit_property_ffo_math():
     d=operating();d['info']['industry']='REIT - Mortgage'
     m=run(d)
-    assert m['model_family']=='mortgage_reit' and 'requires explicit sector inputs' in m['not_rankable']
+    assert m['model_family']=='mortgage_reit' and m['model']=='equity_residual_income'
+    assert m['not_rankable']=='' and m['implied_return_claim']=='equity'
     p=dict(ffo_common=100,recurring_capex=20,leasing_costs=10,growth=0,return_on_new_equity=.12)
     m=run(d,{**CFG,'issuer_inputs':{'TEST':issuer('reit_affo',p)}})
     assert 'model does not match issuer economics' in m['not_rankable']
@@ -138,15 +141,19 @@ def test_ceiling_respects_both_risk_value_and_the_purchase_hurdle():
     assert m['decision_rate']==.095
 
 def test_sourced_cost_of_capital_is_not_ignored_by_the_operating_proxy():
+    import json
     d=operating();baseline=run(d)
     source={'source':'controlled cost-of-capital estimate','as_of':'2026-06-30','period_end':'2026-06-30',
             'currency':'USD','discount_rate':.2,'discount_rate_basis':'wacc'}
     m=run(d,{**CFG,'issuer_inputs':{'TEST':source}})
-    assert m['discount_rate']==.2 and m['decision_rate']==.2
-    assert m['entry_ceiling']<baseline['entry_ceiling']
-    assert m['entry_ceiling']<=m['value_reasonable']
+    assert 'cannot use a firm discount rate' in m['not_rankable']
     source['discount_rate_basis']='cost_of_equity'
-    assert 'cannot use an equity discount rate' in run(d,{**CFG,'issuer_inputs':{'TEST':source}})['not_rankable']
+    m=run(d,{**CFG,'issuer_inputs':{'TEST':source}})
+    assert m['not_rankable']=='' and m['discount_rate']==.2
+    path=json.loads(m['scenario_results'])['base']
+    independent=path['opening_distribution']+V.discount(path['cashflows'],path['terminal_cashflow'],.2,path['terminal_growth'])
+    assert m['value_reasonable']==pytest.approx(max(0,independent))
+    assert m['entry_ceiling']==pytest.approx(max(0,min(m['value_reasonable'],m['value_at_policy_hurdle'])))
 
 def test_complete_sourced_facts_work_when_provider_statements_are_unavailable():
     import pandas as pd
@@ -161,10 +168,14 @@ def test_complete_sourced_facts_work_when_provider_statements_are_unavailable():
     assert m['not_rankable']=='' and m['value_reasonable']==pytest.approx(1150)
 
 def test_preferred_claims_reduce_common_equity_value_dollar_for_dollar():
-    d=operating();first=run(d)
+    p=dict(revenue=1000,growth=0,margin_start=.2,margin_terminal=.2,tax_rate=.25,sales_to_capital=2,
+           maintenance_net_capex=30,funding_capacity=0,terminal_growth=0)
+    source=issuer('operating_forecast',p);source['discount_rate_basis']='wacc'
+    cfg={**CFG,'issuer_inputs':{'TEST':source}}
+    d=operating();first=run(d,cfg)
     for key in ('balance_sheet','quarterly_balance_sheet'):
         d[key].loc['Preferred Stock Equity']=500
-    second=run(d)
+    second=run(d,cfg)
     assert first['value_reasonable']-second['value_reasonable']==pytest.approx(500)
 
 def test_input_dates_and_scenario_discount_basis_are_validated():

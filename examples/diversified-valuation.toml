@@ -1,0 +1,162 @@
+# Fictional bank plus industrial group. Not a company recommendation.
+# Base: bank100 + factory160 - parent27 = USD233.
+# Stress: bank80 + factory120 - parent27 = USD173.
+# Components use separate claims and currencies; amounts are NOT revenue weights.
+# Replace sources, amounts, dates, ownership, FX and discount assumptions before use.
+
+[issuers.EXAMPLE_DIVERSIFIED]
+source = "Fictional example; replace all assumptions and sources before use"
+as_of = "2026-06-30"
+period_end = "2026-06-30"
+currency = "USD"
+model = "sum_of_parts"
+
+[issuers.EXAMPLE_DIVERSIFIED.base]
+currency = "USD"
+source = "Fictional mixed-business worked example; monetary units are raw currency"
+
+[issuers.EXAMPLE_DIVERSIFIED.base.parent_bridge]
+debt = 10.0
+cash = 5.0
+other_claims = 2.0
+corporate_cost_pv = 20.0
+source = "dated debt and cash schedule"
+scope = "parent_only"
+
+[issuers.EXAMPLE_DIVERSIFIED.base.parent_bridge.claim_ids]
+debt = ["parent_only:debt"]
+cash = ["parent_only:cash"]
+other_claims = ["parent_only:other_claims"]
+corporate_cost_pv = ["parent_only:corporate_cost_pv"]
+
+[[issuers.EXAMPLE_DIVERSIFIED.base.components]]
+id = "bank"
+source = "bank standalone statements"
+model = "bank_capital"
+claim = "equity"
+ownership = 1.0
+currency = "USD"
+fx_to_parent = 1.0
+discount_rate = 0.1
+discount_rate_basis = "cost_of_equity"
+terminal_growth = 0.0
+
+[issuers.EXAMPLE_DIVERSIFIED.base.components.parameters]
+net_income = 10.0
+growth = 0.0
+capital_growth = 0.0
+available_capital = 100.0
+capital_base = 1000.0
+required_capital_ratio = 0.1
+payout_limit = 1.0
+releasable_excess = 0.0
+
+[[issuers.EXAMPLE_DIVERSIFIED.base.components]]
+id = "factory"
+source = "factory standalone statements"
+model = "operating_forecast"
+claim = "firm"
+ownership = 0.5
+currency = "EUR"
+fx_to_parent = 2.0
+discount_rate = 0.1
+discount_rate_basis = "wacc"
+terminal_growth = 0.0
+
+[issuers.EXAMPLE_DIVERSIFIED.base.components.firm_bridge]
+debt = 50.0
+cash = 10.0
+preferred = 0.0
+minority = 0.0
+other_claims = 0.0
+source = "dated debt and cash schedule"
+scope = "component_only"
+
+[issuers.EXAMPLE_DIVERSIFIED.base.components.firm_bridge.claim_ids]
+debt = ["component_only:debt"]
+cash = ["component_only:cash"]
+
+[issuers.EXAMPLE_DIVERSIFIED.base.components.parameters]
+revenue = 100.0
+growth = 0.0
+margin_start = 0.2
+margin_terminal = 0.2
+tax_rate = 0.0
+sales_to_capital = 1.0
+maintenance_net_capex = 0.0
+funding_capacity = 0.0
+
+[issuers.EXAMPLE_DIVERSIFIED.stress]
+currency = "USD"
+source = "Fictional mixed-business worked example; monetary units are raw currency"
+
+[issuers.EXAMPLE_DIVERSIFIED.stress.parent_bridge]
+debt = 10.0
+cash = 5.0
+other_claims = 2.0
+corporate_cost_pv = 20.0
+source = "dated debt and cash schedule"
+scope = "parent_only"
+
+[issuers.EXAMPLE_DIVERSIFIED.stress.parent_bridge.claim_ids]
+debt = ["parent_only:debt"]
+cash = ["parent_only:cash"]
+other_claims = ["parent_only:other_claims"]
+corporate_cost_pv = ["parent_only:corporate_cost_pv"]
+
+[[issuers.EXAMPLE_DIVERSIFIED.stress.components]]
+id = "bank"
+source = "bank standalone statements"
+model = "bank_capital"
+claim = "equity"
+ownership = 1.0
+currency = "USD"
+fx_to_parent = 1.0
+discount_rate = 0.1
+discount_rate_basis = "cost_of_equity"
+terminal_growth = 0.0
+
+[issuers.EXAMPLE_DIVERSIFIED.stress.components.parameters]
+net_income = 8.0
+growth = 0.0
+capital_growth = 0.0
+available_capital = 100.0
+capital_base = 1000.0
+required_capital_ratio = 0.1
+payout_limit = 1.0
+releasable_excess = 0.0
+
+[[issuers.EXAMPLE_DIVERSIFIED.stress.components]]
+id = "factory"
+source = "factory standalone statements"
+model = "operating_forecast"
+claim = "firm"
+ownership = 0.5
+currency = "EUR"
+fx_to_parent = 2.0
+discount_rate = 0.1
+discount_rate_basis = "wacc"
+terminal_growth = 0.0
+
+[issuers.EXAMPLE_DIVERSIFIED.stress.components.firm_bridge]
+debt = 50.0
+cash = 10.0
+preferred = 0.0
+minority = 0.0
+other_claims = 0.0
+source = "dated debt and cash schedule"
+scope = "component_only"
+
+[issuers.EXAMPLE_DIVERSIFIED.stress.components.firm_bridge.claim_ids]
+debt = ["component_only:debt"]
+cash = ["component_only:cash"]
+
+[issuers.EXAMPLE_DIVERSIFIED.stress.components.parameters]
+revenue = 100.0
+growth = 0.0
+margin_start = 0.16
+margin_terminal = 0.16
+tax_rate = 0.0
+sales_to_capital = 1.0
+maintenance_net_capex = 0.0
+funding_capacity = 0.0

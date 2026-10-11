@@ -38,28 +38,38 @@ def main():
             m=metrics.compute(data,None,fx,cfg,overrides.get(data['symbol']),valuation_date=args.valuation_date)
             assert 'assumed debt-free' not in m.get('flags','')
             if 'entry_score' in m:
-                assert math.isfinite(m['entry_ceiling']) and m['entry_ceiling']>0
-                ds,terminal=V.distributions(m['base_earnings'],m['est_growth'],m['terminal_growth'],
-                                            cfg['valuation']['years'],m['return_on_capital'],m['terminal_return'])
-                assert min(ds+[terminal])>=0
-                expected=V.discount(ds,terminal,m['hurdle'],m['terminal_growth'])
-                assert expected>0
-                if m.get('implied_growth') is not None:
-                    assert m['implied_growth_status']=='solved'
-                invariants+=1
+                assert math.isfinite(m['entry_ceiling']) and m['entry_ceiling']>=0
+                scenarios=json.loads(m.get('scenario_results','{}'))
+                for case,path in scenarios.items():
+                    flows=path['cashflows'];terminal=path['terminal_cashflow']
+                    pv=path['opening_distribution']+V.discount(flows,terminal,m['discount_rate'],path['terminal_growth'])
+                    scale=max(abs(pv),abs(path['raw_value']),1e-300)
+                    assert abs(pv-path['raw_value'])<=1e-10*scale
+                    assert path['value']==max(0.,path['raw_value'])
+                    calls=max(0.,-path['opening_distribution'])+math.fsum(max(0.,-v) for v in flows)
+                    assert math.isclose(calls,path['funding_required'],rel_tol=1e-10,abs_tol=0)
+                    for step in path['ledger']:
+                        if 'opening_common_equity' in step:
+                            distribution=step['common_earnings']-(step['closing_common_equity']-step['opening_common_equity'])
+                        else:distribution=step['common_earnings']-step['new_equity_investment']
+                        assert math.isclose(distribution,step['net_distribution'],rel_tol=1e-10,abs_tol=1e-12*max(abs(step['common_earnings']),1e-300))
+                    invariants+=1
+                if m['entry_ceiling']==0:assert m['entry_score']==-100 and m['entry_score_raw'] is None
             rows.append(m)
         except Exception as exc:
             errors.append({'symbol':data['symbol'],'error':repr(exc)})
     frame=scoring.score(pd.DataFrame(rows),cfg)
     args.output_dir.mkdir(parents=True,exist_ok=True)
     frame.to_csv(args.output_dir/'results.csv',index=False)
-    summary={'valuation_date':str(args.valuation_date),'records':len(hashes),'successful_computations':len(rows),'funded_path_invariant_checks':invariants,
+    summary={'valuation_date':str(args.valuation_date),'records':len(hashes),'successful_computations':len(rows),'scenario_identity_checks':invariants,
              'statuses':frame['status'].value_counts().to_dict(),'errors':errors,'source_hashes':hashes,
              'fx_provenance':fxdata.get('_provenance'),'config_sha256':hashlib.sha256((root/'config.toml').read_bytes()).hexdigest(),
              'issuer_inputs':cfg['issuer_inputs'],'classification_overrides':overrides,
+             'implementation_sha256':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in (root/'screener').glob('*.py')},
+             'resource_sha256':{str(p.relative_to(root/'screener')):hashlib.sha256(p.read_bytes()).hexdigest() for p in (root/'screener/resources').glob('*.json')},
              'limits':'Cached record replay with explicit frozen FX; no current-price or issuer-filing verification and no return backtest.'}
     (args.output_dir/'validation.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
-    print(json.dumps({k:v for k,v in summary.items() if k not in ('source_hashes','fx_provenance')},indent=2))
+    print(json.dumps({k:v for k,v in summary.items() if k not in ('source_hashes','fx_provenance','issuer_inputs','classification_overrides','implementation_sha256','resource_sha256')},indent=2))
     return bool(errors)
 
 if __name__=='__main__':raise SystemExit(main())

@@ -25,18 +25,8 @@ EDITABLE_VALUATION: dict[str, dict] = {
     "min_hurdle": {"type": "pct", "min": 0.0, "max": 0.30, "label": "Minimum hurdle", "tier": 2,
                    "help": "Never require less than this nominal return, whatever the local rates say."},
     "base_currency": {"type": "currency", "label": "Base currency", "tier": 2,
-                      "help": "Shows an FX-parity scenario; not an expected equity return in this currency."},
-    "adverse_growth_mode": {"type": "choice", "choices": ["half", "haircut"], "label": "Adverse growth", "tier": 2,
-                            "help": "half: half the lowest growth input (declines kept). haircut: lowest input minus the haircut."},
-    "adverse_growth_haircut": {"type": "pct", "min": 0.0, "max": 0.50, "label": "Adverse growth haircut", "tier": 2,
-                               "help": "Only used in haircut mode."},
-    "growth_cap": {"type": "pct", "min": 0.0, "max": 1.0, "label": "Growth cap", "tier": 2,
-                   "help": "Cap on the reasonable-case starting growth."},
-    "growth_floor": {"type": "pct", "min": -0.5, "max": 0.0, "label": "Growth floor", "tier": 2},
-    "return_cap": {"type": "pct", "min": 0.05, "max": 1.0, "label": "Return on capital cap", "tier": 2,
-                   "help": "Book capital is unreliable above this."},
+                      "help": "Reference for explicitly labeled constant-FX scenarios when local policy rates are unavailable."},
     "stale_after_days": {"type": "int", "min": 30, "max": 1000, "label": "Stale after (days)", "tier": 2},
-    "bank_min_equity_to_assets": {"type": "pct", "min": 0.0, "max": 0.20, "label": "Bank thin-capital threshold", "tier": 2},
 }
 RATE_RANGES = {"rf": (-0.05, 0.50), "g": (-0.05, 0.20), "crp": (0.0, 0.20)}
 CCY_RE = re.compile(r"^[A-Z]{3}$")

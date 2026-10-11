@@ -14,17 +14,9 @@ import pandas as pd
 
 from . import valuation as V
 from .fetch import FX, major_currency
-from . import statements as S, market, models
+from . import statements as S, market, models, automatic, evidence_assembly, business_models
 from .inputs import validate_issuer
 from .checks import policy_rates
-
-FINANCIAL_INDUSTRIES = ("Banks", "Insurance - ", "Asset Management", "Capital Markets", "Mortgage Finance",
-                        "Credit Services", "Financial Conglomerates", "Shell Companies")
-CYCLICAL_SECTORS = {"Basic Materials", "Energy"}
-CYCLICAL_INDUSTRIES = {"Semiconductors", "Semiconductor Equipment & Materials", "Auto Manufacturers",
-                       "Farm & Heavy Construction Machinery", "Airlines", "Marine Shipping", "Steel",
-                       "Auto Parts", "Trucking", "Railroads", "Building Materials", "Residential Construction",
-                       "Lumber & Wood Production", "Agricultural Inputs", "Recreational Vehicles"}
 
 from .statements import ROWS, row as _row, latest as _latest, annual as _annual, finite_series as _finite, statement_date as _date
 
@@ -85,49 +77,30 @@ def entry_score(mcap: float, ceiling: float) -> float:
 
 
 def classify(info: dict, override: str | None) -> str:
-    if override:
-        return override
-    if (info.get("quoteType") or "EQUITY") != "EQUITY":
-        return "fund"
-    industry, sector = info.get("industry") or "", info.get("sector") or ""
-    if industry.startswith(FINANCIAL_INDUSTRIES) and industry != "Insurance Brokers":
-        return "financial"
-    if sector in CYCLICAL_SECTORS or industry in CYCLICAL_INDUSTRIES:
-        return "cyclical"
-    return "operating"
+    return business_models.profile(info,{},override)['class']
 
 
 def model_family(info:dict, cls:str, override:str|None) -> str:
-    industry=info.get("industry") or ""
-    if cls in ("holdco","fund"):return cls
-    if industry=="REIT - Mortgage":return "mortgage_reit"
-    if industry.startswith("REIT"):return "reit"
-    if (info.get("sector") or "")=="Utilities":return "regulated"
-    if cls=="financial":
-        if industry.startswith("Banks"):return "bank"
-        if industry.startswith("Insurance"):return "insurer"
-        if override=="financial":return "hybrid"
-        if industry in ("Credit Services","Mortgage Finance"):return "bank"
-        return "financial_other"
-    if cls=="cyclical":return "cyclical"
-    return "operating"
+    return business_models.profile(info,{},override)['family']
 
 
 def _finish_values(m, reasonable, stress, mcap, flags, policy_ceiling=None):
-    ceiling=reasonable if policy_ceiling is None else policy_ceiling
-    m.update(value_reasonable=reasonable,value_adverse=stress,entry_ceiling=ceiling)
-    if not _isnum(ceiling) or ceiling<=0:
-        m["not_rankable"]="nonpositive or invalid equity ceiling"
-    else:
-        m["entry_score_raw"]=100*(1-mcap/ceiling)
-        m["entry_score"]=entry_score(mcap,ceiling)
-        m["adverse_score"]=-100.0 if _isnum(stress) and stress<=0 else entry_score(mcap,stress)
-        m["ceiling_px"]=m["price"]*ceiling/mcap
-        m["reasonable_px"]=m["price"]*reasonable/mcap
-        m["adverse_px"]=m["price"]*max(0.0,stress)/mcap if _isnum(stress) else math.nan
-        if _isnum(stress) and stress>reasonable:
-            flags.append("stress value exceeds base: scenario is not a downside bound")
-    m["flags"]="; ".join(dict.fromkeys(flags))
+    raw_ceiling=reasonable if policy_ceiling is None else policy_ceiling
+    m.update(raw_value_reasonable=reasonable,raw_value_adverse=stress)
+    if not _isnum(raw_ceiling) or not _isnum(reasonable):
+        m.update(not_rankable="nonfinite equity valuation",flags="; ".join(dict.fromkeys(flags)))
+        return m
+    ceiling=max(0.,raw_ceiling);reasonable=max(0.,reasonable)
+    stress=max(0.,stress) if _isnum(stress) else math.nan
+    m.update(value_reasonable=reasonable,value_adverse=stress,entry_ceiling=ceiling,
+             entry_score_raw=100*(1-mcap/ceiling) if ceiling>0 else None,
+             entry_score=entry_score(mcap,ceiling) if ceiling>0 else -100.,
+             adverse_score=entry_score(mcap,stress) if stress>0 else -100. if _isnum(stress) else math.nan,
+             ceiling_px=m['price']*ceiling/mcap,reasonable_px=m['price']*reasonable/mcap,
+             adverse_px=m['price']*stress/mcap if _isnum(stress) else math.nan)
+    if ceiling==0:flags.append('nonpositive common-equity continuation value; limited-liability endpoint shown')
+    if _isnum(stress) and stress>reasonable:flags.append('stress value exceeds base: scenario is not a downside bound')
+    m['flags']='; '.join(dict.fromkeys(flags))
     return m
 
 
@@ -138,7 +111,7 @@ def _explicit_model(m,supplied,vcfg,bridge,mcap,flags,blockers):
                "hybrid":{"asset_nav"},"financial_other":{"financial_capital","operating_forecast","asset_nav"},
                "operating":{"operating_forecast","finite_project","asset_nav"},
                "cyclical":{"operating_forecast","finite_project","asset_nav"}}
-    if m["model_family"] in permitted and name not in permitted[m["model_family"]]:
+    if m["model_family"] in permitted and name not in permitted[m["model_family"]] and name not in ('sum_of_parts','equity_residual_income','operating_equity','asset_recovery'):
         blockers.append("model does not match issuer economics: "+m["model_family"])
     outputs=[];policy_ceiling=None;default_gt=m["terminal_growth"]
     for case in ("base","stress"):
@@ -172,8 +145,13 @@ def _explicit_model(m,supplied,vcfg,bridge,mcap,flags,blockers):
                     m["valuation_basis"]=("source-assumption intrinsic value; separate purchase-policy ceiling" if basis!="policy" else "purchase policy; not fair value")
             else:
                 value=projection
+                m['implied_return_claim']='equity'
                 m["floor_rate"]=math.nan
-                m["valuation_basis"]="attributable asset value; entry ceiling at NAV, no return forecast"
+                m["valuation_basis"]=("component-specific discount/FX assumptions; parent hurdle does not rerate components" if name=='sum_of_parts' else "attributable asset value; entry ceiling at NAV, no return forecast")
+                if name=='sum_of_parts':
+                    detail=business_models.sum_of_parts(params,vcfg['years'],rate,gt,models.evaluate)
+                    m[case+'_components']=json.dumps(detail.components,sort_keys=True)
+                    m[case+'_parent_bridge']=json.dumps(detail.parent_bridge,sort_keys=True)
             outputs.append(value)
         except (KeyError,TypeError,ValueError,OverflowError) as exc:
             blockers.append(f"{case} {name}: {exc}")
@@ -200,6 +178,7 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
     flags: list[str] = []
     blockers: list[str] = []  # reasons the name cannot get an entry ceiling
     supplied = cfg.get("issuer_inputs", {}).get(data["symbol"], {})
+    is_automatic=not supplied.get('model')
     if supplied:
         blockers.extend(validate_issuer(data["symbol"], supplied,effective_date))
     m: dict = {"symbol": data["symbol"], "yahoo_name": info.get("longName") or info.get("shortName") or "",
@@ -207,17 +186,15 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
                "country": info.get("country") or "", "not_rankable": ""}
     if blockers:
         return {**m,"class":classify(info,class_override),"not_rankable":"; ".join(blockers),"flags":"invalid issuer inputs"}
-    cls = classify(info, class_override)
-    family = supplied["model_family"] if "model_family" in supplied else model_family(info, cls, class_override)
-    if "model_family" in supplied:
-        cls="financial" if family in ("bank","insurer","hybrid","financial_other") else "holdco" if family=="holdco" else "cyclical" if family=="cyclical" else "operating"
+    profile=business_models.profile(info,supplied,class_override)
+    cls,family=profile['class'],profile['family']
+    m['business_profile']=json.dumps(profile,sort_keys=True,default=str)
     m["class"] = cls
     m.update(model_family=family, model="funded_earnings", model_quality="accounting proxy",
              model_label=models.LABELS["funded_earnings"],
              valuation_basis="purchase policy; not fair value", implied_return_claim="equity" if cls=="financial" else "firm")
-    m["classification_basis"]="sourced family declaration" if "model_family" in supplied else "explicit override" if class_override else "provider industry"
-    if cls!="fund" and not info.get("industry") and not class_override and "model_family" not in supplied:
-        blockers.append("business classification unavailable: a sourced model_family is required")
+    m['classification_basis']=profile['classification_basis']
+    if profile.get('uncertainties'):flags.extend(profile['uncertainties'])
     if supplied:
         m.update(assumptions_source=supplied["source"],assumptions_as_of=str(supplied["as_of"]))
     if cls == "fund":
@@ -231,7 +208,16 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
         blockers.append("reporting currency unavailable; quote currency does not identify statement units")
     info_price = info.get("regularMarketPrice") or info.get("currentPrice") or info.get("previousClose")
     mcap_q, cap_flags, cap_errors = market.capitalization(info,q_div,supplied)
-    flags.extend(cap_flags);blockers.extend(cap_errors)
+    if is_automatic and (not _isnum(mcap_q) or mcap_q<=0):
+        alternatives,_=evidence_assembly.capitalization_scenarios({**data,'info':info})
+        proxies=[x for x in alternatives if x['id'] in ('aggregate_share_proxy','listed_share_proxy')]
+        if proxies:
+            chosen=next((x for x in proxies if x['id']=='aggregate_share_proxy'),proxies[0])
+            mcap_q=chosen['value_quote'];cap_errors=[]
+            flags.append('capitalization estimated from quote and shares; economic-unit reconciliation required')
+    flags.extend(cap_flags)
+    if is_automatic:flags.extend(cap_errors)
+    else:blockers.extend(cap_errors)
     if isinstance(price_now, market.Observation):
         m["price_as_of"] = price_now.as_of
         price_now = price_now.value
@@ -287,9 +273,14 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
     rates = all_rates.get(f_ccy)
     base_rates = all_rates.get(vcfg.get("base_currency", "EUR"))
     if rates is None:
-        blockers.append(f"no rates for {f_ccy} in config [rates]")
-        hurdle = floor = gT = math.nan
-    else:
+        if is_automatic and base_rates is not None:
+            rates=base_rates
+            m['currency_assumption']=f'Constant future {f_ccy}/{vcfg.get("base_currency","EUR")} FX; cash flows valued under base-currency policy'
+            flags.append('reporting-currency rate unavailable; explicit constant-FX/base-currency policy scenario')
+        else:
+            blockers.append(f"no rates for {f_ccy} in config [rates]")
+            hurdle = floor = gT = math.nan
+    if rates is not None:
         gT = rates["g"]
         # Reporting currency is not country exposure. Domicile is an explicitly
         # labeled screen proxy only; researched weighted exposures take priority.
@@ -310,7 +301,8 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
             flags.append("country exposure uses provider-country proxy")
         elif m["country"]:
             crp=0.0
-            blockers.append("no country-risk assumption for " + m["country"])
+            if is_automatic:flags.append('country premium unspecified; valuation conditional on global policy return')
+            else:blockers.append("no country-risk assumption for " + m["country"])
         else:
             crp=0.0
             flags.append("country exposure unavailable")
@@ -356,6 +348,14 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
         balance_sources.append((name,frame))
     bal_sel = S.select(balance_sources,balance_required,instant=True)
     cf_sel = S.select([("ttm_cashflow",tc),("cashflow",ac)],("ocf","capex"))
+    assembled=None
+    if is_automatic:
+        assembled=evidence_assembly.assemble(data,income_required=('net_income',) if cls in ('financial','holdco') else ('revenue','net_income'),
+            balance_required=('common_equity',),sourced_facts=supplied.get('filing_checks',()),
+            rounding_unit=supplied.get('statement_rounding_unit',0.0))
+        inc_sel,cf_sel=assembled.income,assembled.cashflow
+        # A same-period sourced balance remains preferred when it is complete.
+        if not facts:bal_sel=assembled.balance
     inc,bal,cfs = inc_sel.frame,bal_sel.frame,cf_sel.frame
     selections={"income":inc_sel,"balance":bal_sel,"cashflow":cf_sel}
     m["statement_periods"] = json.dumps(S.period_ledger(selections),sort_keys=True)
@@ -368,14 +368,14 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
         if selection.source.startswith("ttm_"):
             reconciliation.extend({"statement":name,**c} for c in S.trailing_checks(selection.frame,quarterly,keys,rounding))
     m["ttm_reconciliation"] = json.dumps(reconciliation,sort_keys=True)
-    if not supplied.get("model") and any(c["status"]=="unreconciled" for c in reconciliation):
+    if not is_automatic and any(c["status"]=="unreconciled" for c in reconciliation):
         flags.append("TTM/quarterly inputs unreconciled: rounding or accounting basis needs verification")
     checks=S.filing_checks(selections,supplied.get("filing_checks",[]))
     m["filing_reconciliation"]=json.dumps(checks,sort_keys=True)
     for check in checks:
-        if check["status"]=="contradiction":
+        if not is_automatic and check["status"]=="contradiction":
             blockers.append(f"filing contradiction: {check['statement']} {check['field']} at {check['period_end']}")
-        elif check["status"]=="basis_unreconciled":
+        elif not is_automatic and check["status"]=="basis_unreconciled":
             blockers.append(f"filing basis unresolved: {check['statement']} {check['field']} at {check['period_end']}")
     for name,selection in (("income",inc_sel),("balance",bal_sel),("cashflow",cf_sel)):
         if selection.backdated:
@@ -394,8 +394,6 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
         sbc = 0.0
     tax_rate = supplied.get("tax_rate", tax/pretax if _isnum(pretax) and pretax>0 and _isnum(tax) else math.nan)
     if not _isnum(tax_rate) or not 0<=tax_rate<=1:
-        if cls not in ("financial","holdco") and not supplied.get("model"):
-            blockers.append("no valid normalized tax rate")
         tax_rate=math.nan
 
     debt, cash = _latest(bal, "debt"), _latest(bal, "cash")
@@ -404,23 +402,11 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
     if facts and (bal_sel.date is None or str(supplied.get("period_end"))!=bal_sel.date.date().isoformat()):
         blockers.append("sourced balance facts differ from selected balance period")
     debt,cash,equity,minority,preferred=(amounts[k] for k in ("debt","cash","equity","minority","preferred"))
-    # Absence of minority capital is exposed as a bridge limitation; supplied
-    # sector models must provide all noncommon claims explicitly.
-    if not _isnum(minority):
-        if cls != "financial" and not supplied.get("model"):
-            blockers.append("no minority interest reconciliation")
-    if not _isnum(preferred) and cls!="financial" and not supplied.get("model"):
-        blockers.append("no preferred-equity reconciliation")
+    # Claim requirements are enforced by the selected projection: equity models
+    # do not need a second debt/cash bridge; firm models require every bridge leg.
     other_claims=supplied.get("other_claims",0.0)
     m["equity_bridge_scope"]="debt/cash/minority/preferred; other claims " + ("supplied" if "other_claims" in supplied else "not independently reviewed")
-    if math.isnan(debt):
-        if cls != "financial" and not supplied.get("model"):
-            blockers.append("no debt figure")
-    if math.isnan(cash) and cls != "financial" and not supplied.get("model"):
-        blockers.append("no cash figure")
-    if not _isnum(equity) and not supplied.get("model") and "marginal_return" not in supplied:
-        blockers.append("no book equity figure")
-    firm_bridge_needed=supplied.get("model") in ("operating_forecast","regulated_rate_base","finite_project") or (not supplied.get("model") and cls not in ("financial","holdco"))
+    firm_bridge_needed=supplied.get("model") in ("operating_forecast","regulated_rate_base","finite_project")
     lease_evidence=[]
     for name,frame in ((bal_sel.source,bal),("quarterly_balance_sheet",qb),("balance_sheet",ab)):
         values=S.row(frame,"lease_liabilities")
@@ -437,7 +423,8 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
         blockers.append("negative cash/debt/noncommon book claim requires reconciliation")
     scope_issue=market.ownership_check(info,ni,_latest(inc,"consolidated_income"),supplied)
     if scope_issue:
-        blockers.append(scope_issue)
+        if is_automatic:flags.append(scope_issue+'; provider capitalization is a conditional common-equity proxy')
+        else:blockers.append(scope_issue)
     net_debt = debt - cash  # NaN if either is missing
     ev = mcap + net_debt + minority + preferred + other_claims
     m.update(revenue=rev, ebit=ebit, net_income=ni, ev_fc=ev, net_debt_fc=net_debt)
@@ -512,16 +499,8 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
                 break
     if any(math.isinf(g) for g in (rev_cagr,analyst)):
         flags.append("nonfinite provider growth input")
-        if not supplied.get("model"):blockers.append("nonfinite growth input cannot be capped into a forecast")
     growth_inputs = [g for g in (rev_cagr, analyst) if _isnum(g)]
     g_raw = float(np.mean(growth_inputs)) if growth_inputs else math.nan
-    g_est = float(np.clip(g_raw, vcfg["growth_floor"], vcfg["growth_cap"])) if growth_inputs else math.nan
-    if g_raw == g_raw and g_raw > vcfg["growth_cap"]:
-        caps.append("growth cap")
-    elif g_raw == g_raw and g_raw < vcfg["growth_floor"]:
-        caps.append("growth outside screening domain")
-        if not supplied.get("model"):
-            blockers.append("growth below screening domain: explicit recovery or finite-life model required")
     m.update(rev_cagr_3y=rev_cagr, analyst_growth=analyst,growth_raw=g_raw)
     if isinstance(re_,pd.DataFrame):
         for period in ("+1y","0y"):
@@ -538,197 +517,16 @@ def compute(data: dict, price_now: float | None, fx: FX, cfg: dict, class_overri
                         if cls in ("operating", "cyclical") else math.nan)
     if supplied.get("model"):
         return _explicit_model(m,supplied,vcfg,net_debt+minority+preferred+other_claims,mcap,flags,blockers)
-    if family in ("bank","insurer","reit","mortgage_reit","regulated","hybrid","financial_other"):
-        blockers.append(f"{family} requires explicit sector inputs; generic earnings model is not applicable")
-        required={"bank":"bank_capital","insurer":"insurer_capital","reit":"reit_affo",
-                  "mortgage_reit":"asset_nav","regulated":"regulated_rate_base","hybrid":"asset_nav","financial_other":"financial_capital"}[family]
-        m["model"]=required
-        m["model_label"]=models.LABELS[required]+" (inputs needed)"
-
-    # ---------- base earnings and return on capital per model family
-    years, R_cap = vcfg["years"], vcfg["return_cap"]
-    base = base_adv = R0 = R_avg = math.nan
-    if cls in ("financial", "holdco"):
-        fin_type="platform" if family=="hybrid" else family if family in ("bank","insurer") else "other"
-        m["fin_type"] = fin_type
-        base = base_adv = ni
-        if fin_type == "insurer" and vcfg.get("insurer_smooth_earnings", False) and len(a_ni) >= 2 and ni == ni:
-            smoothed = float(a_ni.iloc[-3:].mean())  # a catastrophe-light year is not the base
-            if smoothed < ni:
-                base = base_adv = smoothed
-                flags.append("insurer: 3y average earnings used")
-        value_base, bridge = mcap, 0.0
-        m["earnings_yield"] = ni / mcap if ni == ni else math.nan
-        m["book_yield"] = equity / mcap if equity and equity > 0 else math.nan
-        m["roe"] = ni / equity if equity and equity > 0 else math.nan
-        roe_hist = _finite(a_ni / a_eq.reindex(a_ni.index))
-        m["roe_stability"] = float(roe_hist.std()) if len(roe_hist) >= 3 else math.nan
-        m["equity_to_assets"] = equity / assets if assets and assets > 0 else math.nan
-        R0 = m["roe"]
-        R_avg = float(roe_hist.iloc[-3:].mean()) if len(roe_hist) >= 2 else math.nan
-        if not (equity and equity > 0):
-            blockers.append("no positive book equity")
-        if fin_type == "bank" and m["equity_to_assets"] == m["equity_to_assets"] and \
-                m["equity_to_assets"] < vcfg.get("bank_min_equity_to_assets", 0.04):
-            flags.append(f"thin capital (equity/assets < {vcfg.get('bank_min_equity_to_assets', 0.04):.0%})")
-        if fin_type == "platform":
-            flags.append("hybrid requires business/ownership segmentation; ROE is not a conservative valuation floor")
-        loss_making = math.isnan(ni) or ni <= 0
-    else:
-        value_base, bridge = ev, net_debt + minority + preferred + other_claims
-        ebit_used = ebit_adv = ebit
-        if cls == "cyclical" and len(a_rev) >= 3 and not math.isnan(rev) and rev > 0:
-            margins = list(_finite(a_ebit / a_rev.reindex(a_ebit.index)))
-            if len(margins) >= 3:
-                mid = float(np.median(margins))
-                adv_margin = min(margins) if vcfg.get("cyclical_adverse_margin", "median") == "min" else mid
-                ebit_used = mid * rev
-                ebit_adv = adv_margin * min(rev, float(np.mean(list(a_rev.iloc[-3:]) + [rev])))
-                flags.append("short-window cycle proxy: nonoverlapping annual margins; full cycle not established")
-                m["model_quality"]="short-history cycle proxy"
-        base, base_adv = ebit_used * (1 - tax_rate), ebit_adv * (1 - tax_rate)
-        nopat_ttm = ebit * (1 - tax_rate) if ebit == ebit else math.nan
-        # Consolidated NOPAT must use consolidated capital, including NCI.
-        # Match the earnings period's opening/closing capital where available;
-        # old fiscal year-ends are not silently called a TTM average.
-        capital_points=pd.Series(dtype=float)
-        goodwill_points=pd.Series(dtype=float)
-        for _,source_frame in reversed(balance_sources):
-            capital_points=S.invested_capital(source_frame).combine_first(capital_points)
-            goodwill_points=_finite(_annual(source_frame,"goodwill")).combine_first(goodwill_points)
-        window=S.annual_capital_window(capital_points,inc_sel.date)
-        if window:
-            invested=float(capital_points.loc[list(window)].mean())
-            goodwill=float(goodwill_points.reindex(window).mean()) if goodwill_points.reindex(window).notna().all() else math.nan
-            m["capital_period_basis"]=f"annual opening/closing: {window[0].date()} / {window[1].date()}"
-        else:
-            invested=equity+minority+debt-cash
-            goodwill=_latest(bal,"goodwill")
-            m["capital_period_basis"]="closing capital proxy: annual opening or aligned period unavailable"
-            flags.append("capital-period proxy: annual opening unavailable or not aligned")
-        invested_ex=invested-goodwill
-        m["roic"]=nopat_ttm/invested if invested>0 and _isnum(nopat_ttm) else math.nan
-        m["roic_ex_goodwill"]=nopat_ttm/invested_ex if invested_ex>0 and _isnum(nopat_ttm) else math.nan
-        R0=supplied.get("marginal_return",m["roic"])
-        if "marginal_return" not in supplied:
-            flags.append("book ROIC is an incremental-return proxy; acquisitions included")
-        annual_capital=S.invested_capital(ab)
-        denominators=pd.Series({d:S.annual_average_capital(annual_capital,d) for d in annual_capital.index},dtype=float)
-        roic_hist=_finite(a_ebit.reindex(denominators.index)*(1-tax_rate)/denominators)
-        R_avg=float(roic_hist.iloc[-3:].mean()) if len(roic_hist)>=2 else math.nan
-        m["nopat_yield"] = base / ev if ev > 0 and base == base else math.nan
-        m["fcf_yield"] = fcf_adj / ev if ev > 0 and fcf_adj == fcf_adj else math.nan
-        m["ebit_yield"] = ebit / ev if ev > 0 and ebit == ebit else math.nan
-        m["gross_profitability"] = gross / assets if assets and assets > 0 and gross == gross else math.nan
-        margins_hist = _finite(a_ebit / a_rev.reindex(a_ebit.index))
-        m["margin_stability"] = float(margins_hist.std()) if len(margins_hist) >= 3 else math.nan
-        m["cash_conversion"] = float(fcf / ni) if ni and ni > 0 and fcf == fcf else math.nan
-        ebitda = ebit + da if _isnum(ebit) and _isnum(da) else math.nan
-        m["net_debt_ebitda"] = net_debt / ebitda if ebitda > 0 and _isnum(net_debt) else math.nan
-        if fcf_adj == fcf_adj and fcf_adj < 0:
-            flags.append("negative FCF-SBC (TTM)")
-        loss_making = math.isnan(ebit) or ebit <= 0
-        if loss_making:
-            m["class"] = cls = "preprofit"
-            burn = -(fcf_adj if fcf_adj == fcf_adj else 0)
-            m["cash_runway_years"] = cash / burn if burn > 0 and cash == cash else math.nan
-
-    for y in ("fcf_yield", "earnings_yield", "nopat_yield"):
-        if m.get(y, 0) == m.get(y, 0) and (m.get(y) or 0) > 0.25:
-            flags.append(f"{y} > 25%: check one-offs")
-    m["base_earnings"] = base
-    if cls == "holdco":
-        flags.append("holding company: value via NAV, not screened")
-    if cls in ("holdco", "preprofit") or (cls == "financial" and loss_making):
-        if cls == "financial":
-            m["class"] = "preprofit"
-        m["flags"] = "; ".join(flags)
-        return m
-
-    # ---------- scenarios
-    if _isnum(R0) and R0 > 0:
-        if vcfg.get("return_smoothing", False) and "marginal_return" not in supplied and R_avg == R_avg and R_avg > 0 and R_avg < R0:
-            R0 = R_avg  # one strong year does not set ten years of reinvestment
-            caps.append("R smoothed (3y avg)")
-        if R0 > R_cap and "marginal_return" not in supplied:
-            R0 = R_cap
-            caps.append("R cap")
-    else:
-        blockers.append("no return on capital")
-    if g_est == g_est:
-        g0 = g_est
-    else:
-        g0 = math.nan
-        blockers.append("no supported growth estimate")
-    if R0 == R0 and g0 == g0 and g0 > R0:
-        g0 = R0
-        flags.append("growth capped at return on capital")
-        caps.append("growth <= R")
-    adverse_inputs = [g for g in (rev_cagr, analyst, g0) if g == g]
-    if not adverse_inputs:
-        g_adv = math.nan
-    elif vcfg.get("adverse_growth_mode", "half") == "haircut":
-        g_adv = min(adverse_inputs) - vcfg["adverse_growth_haircut"]
-    else:
-        low = min(adverse_inputs)
-        g_adv = 0.5 * low if low > 0 else low  # half the lowest input; a decline is kept, not halved
-    if g_adv == g_adv and cls == "cyclical" and vcfg.get("cyclical_adverse_growth_at_terminal", False):
-        g_adv = min(g_adv, gT)  # a cycle reverts to trend
-    g_adv = min(g_adv,R0) if g_adv == g_adv and R0 == R0 else g_adv
-    m.update(est_growth=g0, adverse_growth=g_adv, return_on_capital=R0, base_earnings_adverse=base_adv,
-             reinvest_rate=(g0 / R0 if R0 == R0 and R0 > 0 and g0 == g0 else math.nan), caps_hit="; ".join(caps))
-    if not (base == base and base > 0):
-        blockers.append("no positive base earnings")
-    if blockers:
-        m["not_rankable"] = "; ".join(blockers)
-        m["flags"] = "; ".join(flags)
-        return m
-
-    cost_rate=supplied.get("discount_rate",hurdle)
-    rate_basis=supplied.get("discount_rate_basis","policy")
-    if rate_basis=="cost_of_equity":
-        m["not_rankable"]="operating firm cash flows cannot use an equity discount rate"
-        m["flags"]="; ".join(flags)
-        return m
-    terminal_R = supplied.get("terminal_return", min(R0,cost_rate))
-    try:
-        ds,dt=V.distributions(base,g0,gT,years,R0,terminal_R)
-        if dt<=0:
-            raise V.InvalidModel("no sustainable terminal distribution; use an explicit asset/finite-life model")
-        m["modeled_year1_reinvestment"]=base*(1+g0)-ds[0]
-        m["reinvest_rate"]=m["modeled_year1_reinvestment"]/(base*(1+g0))
-        m["reinvestment_gap"]=m["observed_net_investment"]-m["modeled_year1_reinvestment"]
-        firm_value=V.discount(ds,dt,cost_rate,gT)
-        v_reas=firm_value-bridge
-        policy_value=V.discount(ds,dt,hurdle,gT)-bridge
-        ceiling=min(v_reas,policy_value)
-        m["value_at_policy_hurdle"]=policy_value
-        m["discount_rate"]=cost_rate
-        m["decision_rate"]=max(cost_rate,hurdle)
-        m["floor_rate"]=cost_rate
-        if rate_basis!="policy":m["valuation_basis"]="sourced cost of capital with accounting-proxy forecast; ceiling satisfies value and policy constraints"
-        m["terminal_value_fraction"]=dt/(cost_rate-gT)/(1+cost_rate)**years/firm_value if firm_value else math.nan
-        m["terminal_return"]=terminal_R
-    except (ValueError,OverflowError) as exc:
-        m["not_rankable"]="invalid funded model: "+str(exc)
-        m["flags"]="; ".join(flags)
-        return m
-    try:
-        v_adv=V.present_value(base_adv,g_adv,cost_rate,gT,years,R0,terminal_R)-bridge
-        m["stress_status"]="computed at common discount rate"
-    except (ValueError,OverflowError) as exc:
-        v_adv=math.nan
-        m["stress_status"]="invalid: "+str(exc)
-        flags.append("stress case unavailable: "+str(exc))
-    ret=V.solve_return(base,value_base,g0,gT,years,R0,terminal_R)
-    growth=V.solve_growth(base,value_base,max(cost_rate,hurdle),gT,years,R0,terminal_R)
-    m.update(implied_return=ret.value,implied_return_status=ret.status,implied_return_reason=ret.reason,
-             implied_growth=growth.value,implied_growth_status=growth.status,implied_growth_reason=growth.reason,
-             implied_growth_roots=json.dumps(growth.roots),implied_growth_residuals=json.dumps(growth.residuals))
-    # This is an explicitly named FX-parity scenario, not an EUR equity return.
-    if ret.value is not None and base_rates is not None:
-        m["fx_parity_return"]=(1+ret.value)*(1+base_rates["rf"])/(1+rates["rf"])-1
-    return _finish_values(m,v_reas,v_adv,mcap,flags,policy_ceiling=ceiling)
+    # Model-specific input requirements belong to the selected model, not to a
+    # generic firm bridge or a sector label. Context metrics remain descriptive.
+    m.update(earnings_yield=ni/mcap if _isnum(ni) else math.nan,
+             book_yield=equity/mcap if _isnum(equity) else math.nan,
+             roe=ni/equity if _isnum(ni) and _isnum(equity) and equity>0 else math.nan,
+             equity_to_assets=equity/assets if _isnum(equity) and _isnum(assets) and assets>0 else math.nan,
+             fcf_yield=fcf_adj/mcap if _isnum(fcf_adj) else math.nan)
+    context={'family':family,'years':vcfg['years'],'hurdle':hurdle,'terminal_growth':gT,'cfg':cfg,'supplied':supplied,
+             'quote_to_reporting_fx':fx_q_to_f,'valuation_date':effective_date}
+    return automatic.evaluate(data,selections,context,m,flags,blockers,assembled)
 
 
 

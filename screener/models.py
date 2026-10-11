@@ -12,7 +12,10 @@ LABELS={"funded_earnings":"Funded earnings proxy","operating_forecast":"Operatin
         "bank_capital":"Bank capital distributions","insurer_capital":"Insurance capital distributions",
         "financial_capital":"Financial capital distributions",
         "reit_affo":"Property cash distributions","regulated_rate_base":"Regulated asset-base model",
-        "asset_nav":"Attributable asset value","finite_project":"Finite-life project"}
+        "asset_nav":"Attributable asset value","finite_project":"Finite-life project",
+        "equity_residual_income":"Common-equity return and capital scenarios",
+        "operating_equity":"Operating earnings and equity-investment scenarios",
+        "sum_of_parts":"Business-component sum of parts","asset_recovery":"Balance-sheet recovery scenarios (partial value)"}
 
 @dataclass(frozen=True)
 class Projection:
@@ -188,6 +191,19 @@ def project(p:dict, rate:float) -> Projection:
     return Projection(tuple(result),0.0,0.0,rate,"firm","finite_project")
 
 def evaluate(model:str,p:dict,years:int,rate:float,gt:float) -> Projection | float:
+    if model=='asset_recovery':
+        from .asset_models import project_recovery
+        result=project_recovery(p,years,rate,gt)
+        return Projection(result['cashflows'],0.,0.,rate,'equity',model,result['opening_distribution'])
+    if model in ('equity_residual_income','operating_equity'):
+        from . import financial_models, operating_models
+        module=financial_models if model=='equity_residual_income' else operating_models
+        result=module.project(p,years,rate,gt)
+        return Projection(tuple(result['cashflows']),result['terminal_cashflow'],result['terminal_growth'],
+                          rate,'equity',model,result.get('opening_distribution',0.0))
+    if model=='sum_of_parts':
+        from .business_models import sum_of_parts
+        return sum_of_parts(p,years,rate,gt,evaluate).value
     if model=="asset_nav":return asset_nav(p)
     if model=="finite_project":
         V.finite(rate)

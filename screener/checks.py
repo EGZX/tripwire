@@ -67,6 +67,6 @@ def validate(cfg: dict, currencies: set[str]) -> list[str]:
     if base and base not in rates:
         errors.append(f"[valuation] base_currency {base} has no entry in [rates]")
     for ccy in sorted(c for c in currencies if c):
-        if ccy not in rates:
-            errors.append(f"[rates] missing entry for reporting currency {ccy}: add rf and g (and crp) to config.toml")
+        if ccy not in rates and (not base or base not in rates):
+            errors.append(f"[rates] missing entry for reporting currency {ccy} and no base-currency policy for an explicit constant-FX scenario")
     return errors

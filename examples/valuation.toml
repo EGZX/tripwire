@@ -68,3 +68,30 @@ sales_to_capital = 1.5
 maintenance_net_capex = 15.0
 funding_capacity = 100.0
 terminal_growth = 0.02
+
+# General models work without these declarations. These optional refinements
+# illustrate classification metadata and known common property cash flow.
+[issuers.EXAMPLE_PROPERTY]
+source = "Fictional common-holder statements; replace before use"
+as_of = "2026-06-30"
+period_end = "2026-06-30"
+currency = "USD"
+model_family = "reit"
+
+[issuers.EXAMPLE_PROPERTY.gics]
+source = "Replace with dated classification source; Yahoo labels are not verified GICS"
+as_of = "2026-06-30"
+sector = "Real Estate"
+sub_industry = "Industrial REITs"
+
+[issuers.EXAMPLE_PROPERTY.reported_property]
+source = "Fictional fully bridged common-holder AFFO, in raw USD"
+period_end = "2026-06-30"
+period_type = "ttm"
+currency = "USD"
+affo_common = 100000000.0
+
+# A complete mixed-business worked example is in diversified-valuation.toml.
+# Its bank and industrial components independently reconcile to USD233. Each component
+# requires an explicit claim, ownership, currency and discount basis, plus
+# stable claim IDs for its bridge. The parent-only bridge is applied once.

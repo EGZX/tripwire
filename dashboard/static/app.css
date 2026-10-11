@@ -275,6 +275,10 @@ dl.kv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px
 dl.kv dt { color: var(--fg-dim); }
 dl.kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 dl.kv dd .sub { color: var(--fg-dim); font-size: 11px; margin-left: 4px; }
+.inspector dl.kv { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.5fr); }
+.inspector dl.kv dd { overflow-wrap: anywhere; }
+.inspector dl.kv dd .sub { display: block; margin-left: 0; }
+.inspector .score-line .big { white-space: nowrap; }
 .flags { margin: 0; padding-left: 16px; font-size: 12px; }
 .flags li { margin: 2px 0; }
 .flags li.critical { color: var(--fg-err); }

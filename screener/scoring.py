@@ -29,6 +29,8 @@ CRITICAL_FLAGS = ("stale financials", "no market cap", "check one-offs", "thin c
                   "stale or future rates", "rate date unavailable", "filing verification unavailable")
 CRITICAL_FLAGS += ("stale or future FX","FX date unavailable")
 CRITICAL_FLAGS += ("TTM/quarterly inputs unreconciled", "lease/cash-flow basis unreconciled")
+CRITICAL_FLAGS += ("unresolved minor-unit market capitalization", "market-cap override does not match", "unresolved ownership scope")
+CRITICAL_FLAGS += ('unvalued operating or project assets','capitalization estimated from quote and shares')
 
 
 def percentiles(df: pd.DataFrame, spec: dict, weights: dict) -> pd.DataFrame:

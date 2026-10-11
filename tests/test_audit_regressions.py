@@ -8,7 +8,7 @@ from scipy.optimize import minimize_scalar
 from screener import valuation as V, statements as S, market, scoring
 from test_metrics import operating,run,CFG,YEARS,TTM,frame
 
-def test_perpetual_capital_calls_are_rejected_not_ranked():
+def test_perpetual_capital_calls_are_rejected_and_new_terminal_is_feasible():
     with pytest.raises(V.InvalidModel,match="funding"):
         V.present_value(10,-.05,.1,.03,10,.02,.02)
     d=operating()
@@ -18,19 +18,35 @@ def test_perpetual_capital_calls_are_rejected_not_ranked():
         d[key].loc['Cash Cash Equivalents And Short Term Investments']=[50.0]*len(d[key].columns)
     d['revenue_estimate']=pd.DataFrame({'growth':[-.9]},index=['+1y'])
     m=run(d,{**CFG,'valuation':{**CFG['valuation'],'growth_floor':-.9}})
-    assert 'invalid funded model' in m['not_rankable']
-    assert 'entry_score' not in m
+    # The new operating model estimates a distinct mature capital productivity;
+    # it need not perpetuate the low current book return from the old model.
+    parameters=json.loads(m['scenario_parameters'])['base']
+    result=json.loads(m['scenario_results'])['base']
+    assert parameters['terminal_equity_return']>=parameters['terminal_growth']
+    assert result['terminal_cashflow']>=0
+    from screener import operating_models
+    with pytest.raises(V.InvalidModel):
+        operating_models.project({**parameters,'terminal_equity_return':.02},10,.095,.03)
 
 def test_large_decline_is_not_clipped_into_a_favorable_growth_assumption():
     d=operating();d['revenue_estimate']=pd.DataFrame({'growth':[-.9]},index=['+1y'])
     m=run(d)
-    assert 'growth below screening domain' in m['not_rankable']
-    assert m['growth_raw']<-.05 and 'entry_score' not in m
+    parameters=json.loads(m['scenario_parameters'])['base']
+    result=json.loads(m['scenario_results'])['base']
+    assert parameters['growth']==-.9
+    assert result['ledger'][0]['revenue']==pytest.approx(1050*.1)
+    assert result['opening_distribution']==0  # contraction is not cash liquidation
+    assert m['entry_ceiling']<run(operating())['entry_ceiling']
 
 def test_nonfinite_growth_does_not_become_a_valid_forecast_after_clipping():
     d=operating();d['revenue_estimate']=pd.DataFrame({'growth':[float('inf')]},index=['+1y'])
     m=run(d)
-    assert 'nonfinite growth' in m['not_rankable'] and 'entry_score' not in m
+    reference=run(operating(revenue_estimate=pd.DataFrame()))
+    parameters=json.loads(m['scenario_parameters'])
+    for case in ('base','stress','upside'):
+        assert math.isfinite(parameters[case]['growth'])
+        assert parameters[case]['growth']==pytest.approx(json.loads(reference['scenario_parameters'])[case]['growth'])
+    assert any('nonfinite' in warning.lower() for warning in json.loads(m['model_uncertainties']))
 
 def test_contraction_does_not_create_unverified_liquidation_cash():
     ds,term=V.distributions(10,-.05,0,10,.02,.02)
@@ -85,7 +101,10 @@ def test_financial_ttm_does_not_require_ebit():
     d=operating();d['info']['industry']='Banks - Regional'
     d['ttm_income_stmt']=d['ttm_income_stmt'].drop(index='Operating Income')
     m=run(d)
-    assert m['base_earnings']==pytest.approx(159.6)
+    assert m['model']=='equity_residual_income'
+    assert m['net_income']==pytest.approx(159.6)
+    evidence=json.loads(m['model_evidence'])
+    assert next(x['value'] for x in evidence if x.get('input')=='current_common_income')==pytest.approx(159.6)
     assert 'income: annual' not in m['flags']
     assert json.loads(m['statement_periods'])['income']['period_end']=='2026-06-30'
 
@@ -96,9 +115,14 @@ def test_same_period_selection_and_truthful_backdating():
     q.loc['Cash Cash Equivalents And Short Term Investments',pd.Timestamp('2026-06-30')]=900
     d['quarterly_balance_sheet']=q
     m=run(d)
-    assert m['net_debt_fc']==50
-    assert json.loads(m['statement_periods'])['balance']['period_end']=='2026-03-31'
-    assert 'coherent older period 2026-03-31' in m['flags']
+    # The common-equity model does not need debt and keeps the current book.
+    assert math.isnan(m['net_debt_fc'])
+    assert json.loads(m['statement_periods'])['balance']['period_end']=='2026-06-30'
+    # A firm-value caller requiring a complete bridge must select one older
+    # coherent period, never combine old debt with the new900 cash balance.
+    firm=S.select([('quarterly_balance_sheet',q)],('equity','debt','cash'),instant=True)
+    assert firm.date==pd.Timestamp('2026-03-31') and firm.backdated
+    assert S.latest(firm.frame,'debt')-S.latest(firm.frame,'cash')==50
     assert math.isnan(S.latest(q,'debt'))  # no per-field backfill
 
 def test_missing_equity_and_historical_debt_are_not_zero():
@@ -106,10 +130,18 @@ def test_missing_equity_and_historical_debt_are_not_zero():
     for key in ('balance_sheet','quarterly_balance_sheet'):
         d[key]=d[key].drop(index='Stockholders Equity')
     m=run(d)
-    assert 'no book equity' in m['not_rankable'] and 'entry_score' not in m
+    assert math.isnan(S.latest(d['quarterly_balance_sheet'],'common_equity'))
+    assumptions=json.loads(m['model_assumptions'])
+    intensity=next(x for x in assumptions if isinstance(x,dict) and x.get('parameter')=='equity_to_sales')
+    assert intensity['value']>0 and 'industry' in intensity['basis']
+    assert 'unavailable' in intensity['basis'] or 'nonpositive' in intensity['basis']
     d=operating();d['balance_sheet'].loc['Total Debt']=math.nan
     m=run(d)
-    assert m['roic']==pytest.approx(168/650)  # available current capital, no invented historical debt=0
+    assert S.row(d['balance_sheet'],'debt') is None
+    assert S.invested_capital(d['balance_sheet']).empty
+    # Debt is not subtracted a second time from common earnings. Its absence
+    # must not increase value by silently reducing invested capital to zero.
+    assert m['entry_ceiling']==pytest.approx(run(operating())['entry_ceiling'])
 
 def test_minor_unit_market_cap_and_identity_ambiguity():
     base={'regularMarketPrice':1000,'marketCap':100000,'sharesOutstanding':100}
@@ -147,7 +179,7 @@ def test_reconciled_listed_share_basis_repairs_aggregate_cap_scope():
     assert cap==45000 and not errors
     assert 'source-reconciled' in flags[0]
 
-def test_currency_rescaling_preserves_quote_ceiling_and_implied_return():
+def test_currency_rescaling_preserves_quote_ceiling_and_owner_cashflows():
     from screener import metrics
     d=operating();original=run(d)
     for name in ('income_stmt','ttm_income_stmt','cashflow','ttm_cashflow','balance_sheet','quarterly_balance_sheet'):
@@ -160,7 +192,12 @@ def test_currency_rescaling_preserves_quote_ceiling_and_implied_return():
             return 1 if a==b else 1.5 if (a,b)==('USD','CAD') else 2/3 if (a,b)==('CAD','EUR') else 1
     changed=metrics.compute(d,20,ConvertedFX(),cfg,None)
     assert changed['ceiling_px']==pytest.approx(original['ceiling_px'])
-    assert changed['implied_return']==pytest.approx(original['implied_return'])
+    assert changed['entry_score']==pytest.approx(original['entry_score'])
+    before,after=json.loads(original['scenario_results']),json.loads(changed['scenario_results'])
+    for case in ('base','stress','upside'):
+        assert after[case]['cashflows']==pytest.approx([1.5*x for x in before[case]['cashflows']])
+        for field in ('opening_distribution','terminal_cashflow','funding_required','raw_value'):
+            assert after[case][field]==pytest.approx(1.5*before[case][field])
 
 def test_same_period_sourced_debt_can_complete_a_missing_provider_row():
     d=operating();d['quarterly_balance_sheet']=d['quarterly_balance_sheet'].drop(index='Total Debt')

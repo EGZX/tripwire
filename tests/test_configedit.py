@@ -37,16 +37,16 @@ w_value = 0.40
 
 
 def test_plan_edits_values_in_place_and_keeps_everything_else():
-    p = CE.plan(SAMPLE, {"equity_risk_premium": 0.05, "stale_after_days": 300, "adverse_growth_mode": "haircut"}, {}, {"USD", "EUR"})
+    p = CE.plan(SAMPLE, {"equity_risk_premium": 0.05, "stale_after_days": 300, "base_currency": "USD"}, {}, {"USD", "EUR"})
     assert p.errors == []
     cfg = tomllib.loads(p.text)
     assert cfg["valuation"]["equity_risk_premium"] == 0.05
     assert cfg["valuation"]["stale_after_days"] == 300
-    assert cfg["valuation"]["adverse_growth_mode"] == "haircut"
+    assert cfg["valuation"]["base_currency"] == "USD"
     assert "# hurdle = currency risk-free + this" in p.text          # comments survive
     assert "# rates comment stays" in p.text and 'watchlist = "input/watchlist.csv"   # keep' in p.text
     assert cfg["valuation"]["years"] == 10 and cfg["scoring"]["w_value"] == 0.40
-    assert {(c["section"], c["key"]) for c in p.changes} == {("valuation", "equity_risk_premium"), ("valuation", "stale_after_days"), ("valuation", "adverse_growth_mode")}
+    assert {(c["section"], c["key"]) for c in p.changes} == {("valuation", "equity_risk_premium"), ("valuation", "stale_after_days"), ("valuation", "base_currency")}
     assert any(c["old"] == 0.045 and c["new"] == 0.05 for c in p.changes)
 
 

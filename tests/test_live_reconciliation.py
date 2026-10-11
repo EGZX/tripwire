@@ -14,6 +14,12 @@ def evidence(**extra):
     return {'source':'controlled filing','as_of':'2026-10-10','period_end':'2026-06-30','currency':'USD',**extra}
 
 
+def firm_evidence(**extra):
+    p=dict(revenue=1000,growth=0,margin_start=.2,margin_terminal=.2,tax_rate=.25,
+           sales_to_capital=2,maintenance_net_capex=30,funding_capacity=0,terminal_growth=0)
+    return evidence(model='operating_forecast',base=p,stress=deepcopy(p),discount_rate=.1,discount_rate_basis='wacc',**extra)
+
+
 def test_reported_operating_income_keeps_recurring_merchant_losses():
     d=operating()
     d['ttm_income_stmt'].loc['Operating Income']=2363e6
@@ -58,7 +64,7 @@ def test_quarter_crosscheck_does_not_sum_semiannual_or_incomplete_periods():
 def test_source_minimum_debt_abstains_but_does_not_invent_lease_amounts():
     check={'statement':'balance','field':'debt','period_type':'instant','period_end':'2026-06-30',
            'value':3719.7e6,'relation':'minimum','rounding_unit':200000,'source':'two reported borrowing components'}
-    cfg=deepcopy(CFG);cfg['issuer_inputs']={'TEST':evidence(filing_checks=[check])}
+    cfg=deepcopy(CFG);cfg['issuer_inputs']={'TEST':firm_evidence(filing_checks=[check])}
     d=operating();d['quarterly_balance_sheet'].loc['Total Debt']=1984.4e6
     m=run(d,cfg)
     assert 'filing contradiction: balance debt' in m['not_rankable']
@@ -72,7 +78,7 @@ def test_source_minimum_debt_abstains_but_does_not_invent_lease_amounts():
 def test_equal_values_do_not_resolve_different_accounting_bases():
     check={'statement':'balance','field':'debt','period_type':'instant','period_end':'2026-06-30',
            'value':100,'source':'IFRS reference','source_basis':'IFRS','provider_basis':'US GAAP'}
-    cfg=deepcopy(CFG);cfg['issuer_inputs']={'TEST':evidence(filing_checks=[check])}
+    cfg=deepcopy(CFG);cfg['issuer_inputs']={'TEST':firm_evidence(filing_checks=[check])}
     m=run(operating(),cfg)
     assert 'filing basis unresolved' in m['not_rankable']
     assert 'filing contradiction' not in m['not_rankable']
@@ -80,11 +86,11 @@ def test_equal_values_do_not_resolve_different_accounting_bases():
 
 def test_disclosed_operating_leases_cannot_silently_create_an_eligible_candidate():
     d=operating();d['quarterly_balance_sheet'].loc['Capital Lease Obligations']=10
-    m=run(d)
+    cfg={**CFG,'scoring':{'w_value':1,'w_quality':1,'w_growth':1,'w_balance':1},'issuer_inputs':{'TEST':firm_evidence()}}
+    m=run(d,cfg)
     assert 'lease/cash-flow basis unreconciled' in m['flags']
-    cfg={**CFG,'scoring':{'w_value':1,'w_quality':1,'w_growth':1,'w_balance':1}}
     assert not scoring.score(pd.DataFrame([{**m,'entry_score':20}]),cfg).iloc[0]['candidate']
-    cfg['issuer_inputs']={'TEST':evidence(lease_cashflow_reconciled=True)}
+    cfg['issuer_inputs']={'TEST':firm_evidence(lease_cashflow_reconciled=True)}
     assert 'lease/cash-flow basis unreconciled' not in run(d,cfg)['flags']
     d['quarterly_balance_sheet'].columns=pd.to_datetime(['2026-09-30'])
     assert 'lease/cash-flow basis unreconciled' in run(d,cfg)['flags']
@@ -93,7 +99,7 @@ def test_disclosed_operating_leases_cannot_silently_create_an_eligible_candidate
 def test_sourced_balance_cannot_hide_known_same_period_provider_leases():
     d=operating();d['quarterly_balance_sheet'].loc['Capital Lease Obligations']=20
     cfg=deepcopy(CFG)
-    cfg['issuer_inputs']={'TEST':evidence(equity=600,debt=100,cash=50,minority=0,preferred=0)}
+    cfg['issuer_inputs']={'TEST':firm_evidence(equity=600,debt=100,cash=50,minority=0,preferred=0)}
     m=run(d,cfg)
     assert json.loads(m['statement_periods'])['balance']['source']=='issuer facts'
     assert m['lease_liabilities_fc']==20

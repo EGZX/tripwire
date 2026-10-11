@@ -11,7 +11,7 @@ ROWS = {
     # Standardized Operating Income may exclude recurring operating charges
     # (e.g. merchant transaction/loan losses). Prefer the reported statement.
     "ebit": ["Total Operating Income As Reported", "Operating Income", "EBIT"],
-    "net_income": ["Net Income Common Stockholders", "Net Income"],
+    "net_income": ["Net Income Common Stockholders", "Diluted NI Availto Com Stockholders", "Net Income"],
     "pretax": ["Pretax Income"],
     "tax": ["Tax Provision"],
     "da": ["Reconciled Depreciation", "Depreciation And Amortization", "Depreciation Amortization Depletion"],
@@ -40,6 +40,13 @@ ROWS.update({
     "minority_income": ["Minority Interests"],
     "preferred": ["Preferred Stock Equity", "Preferred Stock"],
     "lease_liabilities": ["Capital Lease Obligations"],
+    "investing_cashflow": ["Investing Cash Flow", "Cash Flow From Continuing Investing Activities"],
+    "total_equity": ["Total Equity Gross Minority Interest"],
+    "preferred_dividends": ["Preferred Stock Dividends"],
+    "common_dividends": ["Common Stock Dividend Paid"],
+    "net_common_issuance": ["Net Common Stock Issuance"],
+    "common_issuance": ["Common Stock Issuance"],
+    "common_repurchases": ["Common Stock Payments"],
 })
 
 
@@ -176,7 +183,7 @@ def filing_checks(selections: dict[str, "Selection"], evidence: list[dict]) -> l
     for fact in evidence:
         selection = selections[fact["statement"]]
         period_type = ("instant" if fact["statement"] == "balance" else
-                       "ttm" if selection.source.startswith("ttm_") else "annual")
+                       "ttm" if selection.source.startswith("ttm_") else "quarter" if selection.source.startswith('quarterly_') else "annual")
         check = {**fact, "status": "not_applicable"}
         if selection.date is not None and str(fact["period_end"]) == selection.date.date().isoformat() and fact["period_type"] == period_type:
             actual = latest(selection.frame, fact["field"])

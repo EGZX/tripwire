@@ -58,31 +58,52 @@ A CSV copy of each run is kept in `data/history/`. Runs are never overwritten: a
 
 ## Method
 
-Tripwire separates a **purchase-policy ceiling** from an independently supported intrinsic valuation. The automatic operating-company path is explicitly an **accounting proxy**, not a universal fair-value model. Every value shows its model, evidence basis, cash-flow claim and source dates.
+Tripwire builds **general, source-labeled valuation scenarios**. Reported facts,
+derived inputs, forecasts and uncertainties are separated. The dashboard shows
+base/stress/upside values, the model chosen, owner capital contributions and the
+assumptions behind each result.
 
-**The data must reconcile.** Each statement uses one coherent period; financial companies use net income without requiring EBIT. Missing debt, equity or noncommon claims are not filled with zero. Quotes refresh capitalization and share metadata together. Unresolved currency units, ownership scope, stale observations and missing essentials prevent candidate status.
+**Business economics choose the model.** Operating and recovery forecasts,
+common-equity/residual-income models for financial businesses, property cash and
+maintenance scenarios, and consolidated utility/hybrid models work without a
+handwritten forecast entry for each ticker. Source-provided GICS is optional
+classification evidence, not a one-model-per-sector rule. Diversified groups can
+use a consolidated model or an ownership/currency/claim-consistent sum-of-parts.
 
-**Growth must be funded.** Earnings-based projections validate every year's reinvestment and terminal funding. Falling earnings do not automatically release capital. Accounting ROIC includes acquisition capital; absent sourced alternatives, its terminal return fades to the lower of the current proxy and the policy hurdle. Base and operating-stress cases use the same rate. A stress that raises value is reported as a scenario crossing, not forced into a downside number.
+**Evidence is assembled before estimation.** Coherent quarters can reconstruct
+TTM data; source disagreements are retained. Missing facts remain unknown. An
+unused debt uncertainty does not invalidate an equity-earnings model, while a
+contradiction in earnings actually used by that model still matters. EPS forecasts
+must have compatible periods, currency and share units, including ADR ratios.
 
-**Business economics choose the model.** Source-labeled issuer inputs support operating revenue/margin forecasts (including funded recovery), bank and insurer capital distributions, REIT AFFO, regulated rate-base cash flows, attributable NAV and finite-life projects. Banks, property businesses, utilities and hybrids without their required inputs abstain. Short-window cyclical proxies are flagged. See [the complete contracts and limitations](docs/valuation-method.md) and [fictional input examples](examples/valuation.toml).
+**Growth is not free.** Future equity investment and negative owner distributions
+are priced explicitly. Common-equity models do not subtract debt or leases again.
+Source-backed firm models retain full claim bridges. Scenario ranges are not
+probability bounds; a partial asset-recovery view does not invent project value.
 
-**One absolute score:** `100 × (1 − market cap / positive policy equity ceiling)`, displayed with a −100 floor; the raw score is retained. Scores and eligibility do not depend on which other stocks are in the run. Peer percentiles remain context only.
+**Ranking is distinct from evidence quality.** Each stock's score depends on its
+own price and positive entry estimate, not peers. A zero-equity endpoint receives
+the limiting display score, without dividing by zero. Uncertain quote units,
+ownership and partial asset coverage can still block candidate status while
+preserving a conditional valuation. Funds remain outside single-company models.
 
-**Geography is separate from currency.** Reporting currency sets nominal consistency. Sourced country exposures or an issuer premium override the labeled provider-country-risk policy. The optional FX-parity scenario is not an expected EUR return or an executed hedge.
-
-**Inverse results expose ambiguity.** A unique implied growth/yield is shown only when solved and residual-checked. Multiple roots, weak identification, invalid inputs and absent solutions are distinct states. Firm implied yields are not labeled shareholder returns.
+See [the model contracts](docs/valuation-method.md),
+[general-model validation](docs/general-models-2026-10-11.md), and
+[optional source-input examples](examples/valuation.toml), including a
+[mixed bank/industrial group](examples/diversified-valuation.toml).
 
 ## Sources and reproducibility
 
 - `overrides/valuation.toml` and optional git-ignored `valuation.local.toml` hold sourced issuer facts and base/stress assumptions. No example assumptions are loaded automatically.
 - yfinance supplies annual/trailing/quarterly statements, analyst ranges/counts, earnings estimates and revisions. Coverage varies; missing data is visible.
 - An explicit `sec_cik` plus `SEC_USER_AGENT` enables optional SEC companyfacts retrieval. This is a limited standard US-GAAP balance-fact mapper, not automatic global or regulatory-capital extraction. Configuration/access failures are visible.
-- Raw fetched fundamentals and optional filings are saved as immutable snapshots. Each run retains its configuration, code hashes, statement periods and quote/FX observations.
+- Raw fetched fundamentals and optional filings are saved as immutable snapshots. Each run retains configuration, code/resource hashes, statement periods and quote/FX observations.
+- Dated public industry references ship with the package and can be refreshed explicitly with `python tools/refresh_industry_references.py`; failed source validation preserves the previous snapshot.
 - Experimental inference, cycle estimation and probabilistic ranking are kept outside production in [research/README.md](research/README.md).
 
 ## Known limits
 
-Automatic values still use accounting capital, a revenue-growth proxy, effective taxes and a simplified equity bridge. Maintenance investment, restricted cash, pensions, dilution, geographic operations, acquisition economics and marginal returns need issuer-specific evidence. Explicit sector models expose these requirements; they do not invent missing financial facts.
+Automatic values are estimates. Future margins, capital allocation, regulatory limits, maintenance requirements, financing availability, dilution, geographic exposure and business mix remain assumptions unless stronger evidence is supplied. Missing detail changes the model, scenario range or uncertainty label; it is not a blanket sector exclusion. Pre-revenue asset recovery is explicitly partial when projects cannot yet be valued. Sourced overrides and component models support higher-detail research without ticker-specific code.
 
 Neither these valuation assumptions nor candidate selection has been validated as predictive of future stock returns. Free timestamped filings can support limited point-in-time fundamental analysis, but complete historical global consensus, delisted stocks and contemporaneous universes remain separate data requirements. Numerical tests and a green regression snapshot do not establish investment performance.
 

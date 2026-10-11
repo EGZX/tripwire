@@ -17,18 +17,8 @@ equity_risk_premium = 0.045    # hurdle = currency risk-free + this. 1.0 x ERP: 
 
 min_hurdle = 0.07              # never require less than this nominal return, whatever the local rates say
 min_rate_over_terminal_growth = 0.02  # hurdle and floor are lifted to at least terminal growth + this (Gordon needs r > g)
-base_currency = "EUR"          # optional FX-parity scenario, not an expected EUR equity return
-adverse_growth_mode = "half"   # "half": adverse growth = half the lowest growth input (declines kept); "haircut": minus adverse_growth_haircut
-adverse_growth_haircut = 0.05
-cyclical_adverse_growth_at_terminal = true  # cyclicals: adverse growth never above terminal growth (cycle reverts to trend)
-cyclical_adverse_margin = "min"             # cyclicals: adverse case uses the trough EBIT margin ("median" to disable)
-years = 10                     # growth and the return on new capital fade linearly over this horizon
-growth_cap = 0.30              # cap on the reasonable-case starting growth (also capped at the return on capital)
-growth_floor = -0.05
-return_cap = 0.40              # cap on the return on new capital (book capital is unreliable above this)
-return_smoothing = true        # return on new capital = lower of current and 3-year average
-insurer_smooth_earnings = true # insurers: base earnings = lower of TTM and 3-year average
-bank_min_equity_to_assets = 0.04  # banks below this get a critical "thin capital" flag
+base_currency = "EUR"          # reference currency for explicit constant-FX policy scenarios when no local rate is configured
+years = 10                     # explicit forecast horizon; model-specific growth/earning-power paths converge to stated terminal assumptions
 stale_after_days = 270         # flag when the oldest statement used is older than this
 quote_max_age_days = 7         # calendar-day freshness policy; accommodates normal market closures
 rates_max_age_days = 90        # same review interval as the dashboard rate warning
@@ -68,7 +58,7 @@ w_balance = 0.10
 
 # Provider-country SCREENING PROXIES migrated from the previous policy table; these are
 # not calibrated operating-exposure estimates. Issuer geographic assumptions override them.
-# Countries without an existing policy (e.g. Uruguay/Israel) require explicit inputs.
+# Missing country policies use a disclosed conditional global-policy scenario.
 [country_risk]
 "United States" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }
 "Canada" = { premium = 0.0, as_of = "2026-10-10", source = "existing screening policy; provider-country proxy" }

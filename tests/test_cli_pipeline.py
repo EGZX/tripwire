@@ -16,7 +16,12 @@ def test_cli_writes_reports_and_provenance_even_when_every_name_abstains(tmp_pat
     (tmp_path/'input').mkdir()
     (tmp_path/'input/watchlist.csv').write_text('symbol,name,yahoo_symbol\nTEST,Test,TEST\n',encoding='utf-8')
     d=operating();d['info']['country']='United States'
-    if bank_only:d['info']['industry']='Banks - Regional'
+    if bank_only:
+        d['info']['industry']='Banks - Regional'
+        # Missing essential common earnings still produces an auditable report;
+        # a bank label alone is no longer a reason to refuse valuation.
+        for key in ('ttm_income_stmt','income_stmt'):
+            d[key]=d[key].drop(index='Net Income Common Stockholders')
     stamp=datetime.now(timezone.utc)
     d.update(fetched_at=stamp,source_snapshot='controlled-test-record',source_sha256='controlled')
     d['info']['regularMarketTime']=int(stamp.timestamp())

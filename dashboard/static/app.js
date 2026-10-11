@@ -15,7 +15,6 @@ const SCORED = ["eligible", "data flag", "price above ceiling"];
 const STATUS_ORDER = ["eligible", "data flag", "price above ceiling", "not rankable", "not screened"];
 const STATUS_LABEL = { "eligible": "Candidate", "data flag": "Data flag", "price above ceiling": "Above ceiling",
   "not rankable": "Not rankable", "not screened": "Not screened" };
-const CRITICAL = ["stale financials", "no market cap", "check one-offs", "thin capital", "quote date unavailable", "quote refresh failed", "stale cache fallback", "country exposure unavailable", "short-window cycle proxy", "stale or future quote", "stale or future rates", "rate date unavailable", "filing verification unavailable", "stale or future FX", "FX date unavailable"];  // screener/scoring.py CRITICAL_FLAGS
 const CLIP_LO = -100, CLIP_HI = 100;  // the screener floors the entry score at -100 (price >= 2x the ceiling)
 const TICKS = [-100, -75, -50, -25, 0, 25, 50, 75, 100];
 const MINUS = "−";
@@ -438,7 +437,7 @@ function viewOverview() {
     kpi("Above ceiling", String(by("price above ceiling")), null, { status: "price above ceiling", onclick: () => filterTo("price above ceiling") }),
     kpi("Data flag", String(by("data flag")), null, { title: "Scored, but a critical data flag blocks candidate status", status: "data flag", onclick: () => filterTo("data flag") }),
     kpi("Not rankable", String(by("not rankable")), null, { title: "An essential input is missing", status: "not rankable", onclick: () => filterTo("not rankable") }),
-    kpi("Not screened", String(by("not screened")), null, { title: "Loss-making, holding company or fund", status: "not screened", onclick: () => filterTo("not screened") }),
+    kpi("Not screened", String(by("not screened")), null, { title: "Fund or instrument outside individual-equity models", status: "not screened", onclick: () => filterTo("not screened") }),
     kpi("Median entry score", fmtScore(med), null, { title: "Median over candidates, data-flag and above-ceiling names" }),
     kpi("Holdings at/below ceiling", vScored > 0 ? fmtPct(vBelow / vScored, 0) : "–", vScored > 0 ? fmtEurK(vBelow) + " of " + fmtEurK(vScored) : null,
       { onclick: () => go("holdings"), title: "Share of the euro value of scored holdings whose price is at or below the max entry price" }),
@@ -669,7 +668,7 @@ function viewHoldings() {
       kpi("Holdings value", fmtEurK(total), owned.length + " positions", { hero: true }),
       kpi("Scored value at/below ceiling", vScored > 0 ? fmtPct(vBelow / vScored, 0) : "–", fmtEurK(vBelow) + " of " + fmtEurK(vScored), { status: "eligible" }),
       kpi("Value-weighted entry score", fmtScore(wavg), null, { title: "Position-weighted mean entry score of scored holdings" }),
-      kpi("Not screened", fmtEurK(sum(owned.filter((r) => r.status === "not screened").map((r) => num(r.position_eur)))), null, { title: "Funds, holding companies, loss-making", status: "not screened" })),
+      kpi("Not screened", fmtEurK(sum(owned.filter((r) => r.status === "not screened").map((r) => num(r.position_eur)))), null, { title: "Funds or instruments outside individual-equity models", status: "not screened" })),
     card("Holdings value by status", "", statusBar(byStatus, total), {}),
     h("section", { class: "card" }, h("div", { class: "card-head" }, h("h3", { text: "Positions" }), null),
       h("div", { class: "card-body flush" }, table(owned, [C.symbol, C.name, C.status, posCol, wCol, C.score, C.price, C.ceiling, C.ccy, C.head, C.spread], S.holdSort,
@@ -875,7 +874,7 @@ function dumbbell(rows) {
 // ---------------------------------------------------------------- Data quality
 function splitFlags(r) { return String(r.flags || "").split(/;\s*/).map((x) => x.trim()).filter(Boolean); }
 function flagKind(f) { return f.replace(/^fx \S+->\S+$/, "currency conversion (fx)").replace(/^(\w+) > 25%: check one-offs$/, "yield > 25%: check one-offs"); }
-function isCritical(f) { return CRITICAL.some((c) => f.includes(c)); }
+function isCritical(f) { return (S.config?.critical_flags || []).some((c) => f.includes(c)); }
 function viewData() {
   const rows = S.rows;
   const counts = new Map();
@@ -889,7 +888,7 @@ function viewData() {
   const missingCcy = [...new Set(rows.map((r) => r.currency).filter((c) => c && !rateCcys.has(c)))];
   const out = [pageHeader("Data quality")];
   if (missingCcy.length && S.config && S.config.available) out.push(h("div", { class: "banner warn" }, icon('<path d="M10 3l7.5 13h-15z"/><path d="M10 8v4M10 14.2v.3"/>'),
-    h("div", { text: "Reporting currencies missing from the rates table in config.toml: " + missingCcy.join(", ") + ". Names reporting in them are not rankable." })));
+    h("div", { text: "Reporting currencies missing from the rates table in config.toml: " + missingCcy.join(", ") + ". Names reporting in them use an explicit constant-FX estimate at the base-currency policy rate." })));
   const usedCcys = new Set(rows.map((r) => r.currency).filter(Boolean));
   const staleRates = ((S.config && S.config.rates) || []).filter((x) => usedCcys.has(x.currency) && (x.age_days === null || x.age_days === undefined || x.age_days > RATE_WARN_DAYS));
   if (staleRates.length) out.push(h("div", { class: "banner warn" }, icon('<path d="M10 3l7.5 13h-15z"/><path d="M10 8v4M10 14.2v.3"/>'),
@@ -1205,10 +1204,7 @@ const RATE_WARN_DAYS = 90, RATE_ERR_DAYS = 180;
 const STRUCTURAL = [  // shown, never edited here: a change is a model change (config edit + golden-file update)
   ["years", "Horizon", (v) => (v ?? "–") + " years"],
   ["min_rate_over_terminal_growth", "Rates at least", (v) => "terminal g + " + fmtPct(v ?? 0.02, 1)],
-  ["return_smoothing", "Return on capital", (v) => v ? "lower of current and 3-year average" : "current"],
-  ["insurer_smooth_earnings", "Insurer earnings", (v) => v ? "lower of TTM and 3-year average" : "TTM"],
-  ["cyclical_adverse_margin", "Cyclical adverse margin", (v) => v === "min" ? "trough margin of the window" : "median margin"],
-  ["cyclical_adverse_growth_at_terminal", "Cyclical adverse growth", (v) => v ? "never above terminal growth" : "as other names"],
+
 ];
 
 // mirror of dashboard/data.py derived_rates (itself a mirror of screener/metrics.py)
@@ -1436,6 +1432,16 @@ async function renderInspector() {
   const ratio = (k, label, d = 2) => has(k) ? [label, fmtRatio(r[k], d)] : null;
   const spread = num(r.implied_return) - requiredRate(r);
   const flags = splitFlags(r);
+  const decoded = (key, fallback) => { try { return JSON.parse(r[key] || JSON.stringify(fallback)); } catch { return fallback; } };
+  const assumptions = decoded("model_assumptions", []), uncertainty = decoded("model_uncertainties", []);
+  const profile = decoded("business_profile", {});
+  const components = decoded("base_components", []), parentBridge = decoded("base_parent_bridge", {});
+  const assumptionText = (a) => {
+    if (typeof a === "string") return a;
+    const key = a.parameter || a.input || "Assumption";
+    const value = a.value === undefined ? "" : typeof a.value === "number" ? (/growth|margin|return|roe/.test(key) ? fmtPct(a.value, 2) : fmtNum(a.value, 4)) : JSON.stringify(a.value);
+    return [key.replaceAll("_", " "), value, a.basis || ""].filter(Boolean).join(": ");
+  };
   const yahoo = r.symbol ? "https://finance.yahoo.com/quote/" + encodeURIComponent(r.symbol) : null;
 
   fill(el,
@@ -1448,25 +1454,42 @@ async function renderInspector() {
     h("div", { class: "insp-section" },
       h("h4", { text: "Entry score" }),
       scored ? h("div", { class: "score-line" }, h("span", { class: "big", text: fmtScore(x) }),
-        h("span", { class: "expl", text: hr >= 0 ? "price is " + fmtPct(1 - num(r.price) / num(r.ceiling_px), 0) + " below the max entry price" : "price must fall " + fmtPct(-hr, 0) + " to reach the max entry price" }))
+        h("span", { class: "expl", text: num(r.ceiling_px) <= 0 ? "No positive base continuation value; recovery option value is not asserted" : hr >= 0 ? "price is " + fmtPct(1 - num(r.price) / num(r.ceiling_px), 0) + " below the max entry price" : "price must fall " + fmtPct(-hr, 0) + " to reach the max entry price" }))
         : h("div", { class: "dim", text: r.not_rankable ? "Not rankable: " + r.not_rankable : r.status === "not screened" ? "Not screened (" + (r.class || "") + "): no ceiling is computed for this class." : "No score." }),
       scored && ok(r.adverse_score) ? h("div", { class: "small dim", text: "Stress score " + fmtScore(r.adverse_score) }) : null,
       scored && ok(r.cost_score) ? h("div", { class: "small dim", text: "Score at your avg cost (" + fmtPx(r.cost_px) + ") " + fmtScore(r.cost_score) }) : null,
       scored ? ladder(r) : null),
     scored || has("price") ? h("div", { class: "insp-section" }, h("h4", { text: "Valuation (" + (ccy || "quote currency") + " per share)" }), kv([
-      ["Price", fmtPx(r.price)], ["Max entry price", fmtPx(r.ceiling_px)], ["Reasonable value", fmtPx(r.reasonable_px)], ["Operating stress value", fmtPx(r.adverse_px)],
+      ["Price", fmtPx(r.price)], ["Max entry price", fmtPx(r.ceiling_px)], ["Base scenario", fmtPx(r.reasonable_px)], ["Stress scenario", fmtPx(r.adverse_px)],
+      has("upside_px") ? ["Upside scenario", fmtPx(r.upside_px)] : null,
+      has("valuation_range_low_px") ? ["Scenario envelope", fmtPx(r.valuation_range_low_px) + " – " + fmtPx(r.valuation_range_high_px)] : null,
+      has("funding_required") ? ["Modeled owner contributions", fmtNum(r.funding_required, 0) + " " + (r.currency || ""), "Gross nominal forecast contributions; already charged in value, not an issuance forecast"] : null,
       has("implied_return") ? ["Implied flow yield", fmtPct(r.implied_return), Number.isFinite(spread) ? fmtPP(spread) + " vs hurdle" : null] : null,
+      has("implied_return_status") ? ["Yield identification", r.implied_return_status] : null,
       has("fx_parity_return") ? ["FX-parity scenario in " + baseCcy(), fmtPct(r.fx_parity_return)] : null,
       ["Model", r.model_label || r.model || "legacy"], ["Value basis", r.valuation_basis || "legacy run"], pct("discount_rate", "Valuation rate"), ["Evidence", r.model_quality || "legacy run"], ["Flow claim", r.implied_return_claim === "firm" ? "Whole business" : r.implied_return_claim === "equity" ? "Common equity" : "unknown"], ["Growth solution", r.implied_growth_status || "legacy"], r.implied_growth_status === "nonunique" ? ["Growth solutions", JSON.parse(r.implied_growth_roots || "[]").map((g) => fmtPct(g, 2)).join(" / ")] : null, ["Quote as of", r.price_as_of || "unknown"],
       pct("hurdle", "Policy hurdle"), pct("decision_rate", "Required rate"), pct("floor_rate", "Stress discount rate"),
       has("est_growth") ? ["Estimated growth", fmtPct(r.est_growth)] : null,
-      has("est_growth") ? ["Implied growth", has("implied_growth") ? fmtPct(r.implied_growth) : "no solution", null] : null,
+      has("implied_growth") ? ["Implied growth", fmtPct(r.implied_growth)] : null,
       pct("adverse_growth", "Stress growth"), pct("terminal_growth", "Terminal growth"),
       pct("return_on_capital", "Assumed incremental return (R)"), pct("reinvest_rate", "Reinvestment rate (g / R)")]),
       has("caps_hit") ? h("div", { class: "small dim", style: { marginTop: "6px" }, text: "Caps hit: " + r.caps_hit }) : null) : null,
+    has("model_selection_reason") ? h("div", { class: "insp-section" }, h("h4", { text: "Business model" }),
+      h("p", { text: r.model_selection_reason }),
+      h("p", { class: "small dim", text: profile.gics ? "GICS: " + (profile.gics.sub_industry || profile.gics.industry || profile.gics.code || "source provided") + "; classification is separate from valuation economics." : "Provider industry labels; no verified GICS assignment supplied." }),
+      profile.diversified ? h("p", { class: "small dim", text: "Diversified group: component evidence is retained separately." }) : null) : null,
+    assumptions.length ? h("div", { class: "insp-section" }, h("h4", { text: "Forecast assumptions" }), h("ul", { class: "flags" }, assumptions.map((a) => h("li", { text: assumptionText(a) })))) : null,
+    components.length ? h("div", { class: "insp-section" }, h("h4", { text: "Business components" }),
+      kv(components.map((c) => [c.id, fmtNum(c.value_in_parent_currency, 0) + " " + (r.currency || ""),
+        fmtPct(c.ownership, 0) + " owned; " + (c.model || "") + "; " + (c.source || "")])),
+      h("p", { class: "small dim", text: "Parent adjustments are applied once; " + (parentBridge.source || "source in valuation inputs") }),
+      kv([["Parent cash", fmtNum(parentBridge.cash, 0)], ["Parent debt", fmtNum(parentBridge.debt, 0)],
+        ["Other parent claims", fmtNum(parentBridge.other_claims, 0)], ["Parent cost present value", fmtNum(parentBridge.corporate_cost_pv, 0)],
+        ["Net parent adjustment", fmtNum(parentBridge.effect, 0) + " " + (r.currency || "")]])) : null,
+    uncertainty.length ? h("div", { class: "insp-section" }, h("h4", { text: "Model uncertainty" }), h("ul", { class: "flags" }, uncertainty.map((a) => h("li", { text: String(a) })))) : null,
     h("div", { class: "insp-section", id: "insp-history" }, h("h4", { text: "Price and max entry across runs" }), h("div", { class: "dim small", text: "Loading…" })),
     h("div", { class: "insp-section" }, h("h4", { text: "Fundamentals" }), kv([
-      pct("nopat_yield", "NOPAT / EV"), pct("fcf_yield", "FCF − SBC / EV"), pct("ebit_yield", "EBIT / EV"), pct("earnings_yield", "Earnings yield"),
+      pct("nopat_yield", "NOPAT / EV"), pct("fcf_yield", r.model === "funded_earnings" ? "FCF − SBC / EV" : "FCF − SBC / equity cap"), pct("ebit_yield", "EBIT / EV"), pct("earnings_yield", "Earnings yield"),
       ratio("book_yield", "Book / market cap"), pct("roic", "ROIC"), pct("roic_ex_goodwill", "ROIC ex goodwill"), pct("roe", "ROE"), pct("gross_profitability", "Gross profit / assets"),
       ratio("cash_conversion", "FCF / net income"), pct("rev_cagr_3y", "Revenue CAGR 3y"), pct("analyst_growth", "Analyst revenue growth"),
       ratio("net_debt_ebitda", "Net debt / EBITDA", 1), pct("share_cagr", "Share count CAGR"), ratio("evs", "EV / Sales", 1), ratio("evs_vs_hist", "EV/Sales vs 5y median"),
@@ -1493,7 +1516,7 @@ function ladder(r) {
   const items = [["Max entry price", num(r.ceiling_px), "var(--pos)"]];
   // runs before 2026-10-10 evening took the lower of the two cases; show the reasonable value only where it differs
   if (ok(r.reasonable_px) && Math.abs(num(r.reasonable_px) / num(r.ceiling_px) - 1) > 1e-9) items.push(["Reasonable value", num(r.reasonable_px), "var(--neutral-mark)"]);
-  items.push(["Operating stress value", num(r.adverse_px), "var(--neutral-mark)"]);
+  items.push(["Stress value", num(r.adverse_px), "var(--neutral-mark)"]);
   const p = num(r.price);
   const finite = [p, ...items.map((i) => i[1])].filter(Number.isFinite);
   const hi = Math.max(...finite) * 1.08;

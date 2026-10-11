@@ -1,0 +1,405 @@
+{
+  "code_sha256": {
+    "dashboard/__init__.py": "35db8969ddff600c213716e9a461b4daba94329127d682294a4d68be4104d8fe",
+    "dashboard/__main__.py": "d10e211630755c4d93c1d087c3f3634d320f9cf5fa24b598054b774b1ae766ab",
+    "dashboard/configedit.py": "db0fe5b0f056e262d6a5f5c9cc599a2d4d75ddccfd38e823700eb35faf3e4f22",
+    "dashboard/data.py": "f0edc9d4fcc26dfc0790b69a85c15786082fb831321780698cd35ca027fcd35a",
+    "dashboard/inputedit.py": "fdc01c4529b887bd50efff3c97b4d0f6169b2a22447353105b8d63c1c5702aeb",
+    "dashboard/jobs.py": "4896ac24a3843f215abec713841d1d940a50ecdb7b3e00dd19ce2ec88c81f988",
+    "dashboard/search.py": "07964d723afd80499b4cae8e18256b446144845efc077927eed6944cfcada807",
+    "dashboard/server.py": "4adc529dc2a78eb00261aac5e1b876f979a6bac9d09b81da98a3384ba3a8a524",
+    "dashboard/static/app.css": "9fd2dd777076eef839ea6f4ee55615310c84a1c876d01a83825a2601f622f667",
+    "dashboard/static/app.js": "2c7b0107ec0c61e915c0b868665cd5eb9fae9f756cd9d96aedd7e3a5ae078afb",
+    "dashboard/static/theme.js": "3173a4861d72879a21ea9b9fb522022bfe624cd031ad2f1806db79ad37e569b5",
+    "screener/__init__.py": "1773e54f7a562743a45cb13572aa8f0137cdb41e1c49c09cba3250beb83d3b9f",
+    "screener/__main__.py": "273a22d8b908fa051ac6ea4dee493271e0ddf261983a2b84806fa3e486193155",
+    "screener/asset_models.py": "accd263d36ffbcccaccd04af48206a0b441b4eaa0adb4c8577fb339ff30cbe2f",
+    "screener/automatic.py": "16494374c1eb963cd80b32ff20241c0f4307017c59a5064bbe8760c0362fe5c3",
+    "screener/business_models.py": "2eca3e3eda189a1236220a376a2e23e66bca19b7abe16ba1f93bf74a653be029",
+    "screener/checks.py": "4213fe9a90703346f4ba20e0cf24819f807dd9d2f280d963a1e850cebeb84b69",
+    "screener/evidence_assembly.py": "49c26a7627f4933f90a21557e32d96838f58b60d301b1675accbed6e118980d1",
+    "screener/fetch.py": "73af27c7a94e307b96c33dd60215fe87079b5180b058116268d1691c83989f1f",
+    "screener/filings.py": "91b1945c57dd5c2b60abe838ba2f37078286f15244f43812532245ef3ae53a5d",
+    "screener/financial_models.py": "9196207505f961d648d000ee886a33cb5d664f5e7159943e71bd3fa762a0f3d2",
+    "screener/inputs.py": "335620e5a11616a75c365beed9043b565d1a4579b52757705be32a9a9ce35322",
+    "screener/market.py": "7c789b7b97ac35c4358fd4e9108cb1b2993b77ff80260d10f8239906b03b5f1a",
+    "screener/metrics.py": "2ce2424625e4acdedee61c8eaf83235838b993d101a4a0ccf535a4dc85f01780",
+    "screener/models.py": "9d9e938fe9aa172558fd672f1f061359fd3a944a54700983446de6ab1923e106",
+    "screener/operating_models.py": "9c6a3816e4322a16fa4c3a183cde07f7e619abc44ba310b39ebdf030b2cf9805",
+    "screener/report.py": "07affd4d50731128a34119863d8f1780931227b4c8502736d031fa73035abb77",
+    "screener/resolve.py": "46b40b9ff5cb6ede8d32c14c9d102503ffae703b9b58c681f37be4ce690c6094",
+    "screener/resources/industry_benchmarks.json": "01d2190a67abbcba01435317847ae4cfd0c3f2cc20067930509f48377ba24f77",
+    "screener/scoring.py": "89e516d27fed916d3e59e9d012b1b8f68658c19b10b536ec58e7fbd7c1c93f8c",
+    "screener/statements.py": "c60f43a22a5fca56258bb24f5316962a7edf52229e1dfbaa6ff55c6e51564e2b",
+    "screener/universe.py": "910bafcd0b9ef1278a85394602dbfb31f48e9b4a76f7c9a811652196f8a1cdd3",
+    "screener/valuation.py": "2ced4134645589b1e8f90b17023f8c45998759a221cbefc0f4c5062c1d94c745",
+    "tools/refresh_industry_references.py": "9f0cc0bdb0d3174c91548c07d82f35bbcdd44e5a598d7e699a0ea9ab26ce8bbd",
+    "tools/validate_corpus.py": "8adf68d83e8754b69eb25ef44bf9c01fdab48699c00a830035ec9eddbfee8448",
+    "tools/validate_live.py": "5b813697d9e06fc5ac0cbe9e5f06933acf2b268acdfa9c37948caba3a580ebcb"
+  },
+  "cohorts": {
+    "release-corpus": {
+      "critical_flag_counts": {
+        "capitalization estimated from quote and shares": 1,
+        "stale financials": 1,
+        "unresolved ownership scope: multiple share classes or partnership units require economic-rights reconciliation": 15,
+        "unvalued operating or project assets": 1
+      },
+      "privacy": "Symbol-level preserved-corpus results remain in ignored local validation artifacts.",
+      "results_sha256": "87e1c77b4ee44f14897288d22d34f658de38d48a7a2ff3c75c4c828ef3c9d2f5",
+      "rows": 131,
+      "statuses": {
+        "data flag": 18,
+        "eligible": 10,
+        "not screened": 1,
+        "price above ceiling": 102
+      }
+    },
+    "release-heldout": {
+      "results": [
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "DUK"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "IBE.MC"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "not_identified: future distributions include capital calls; yield uniqueness has not been established",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "O"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "not_identified: future distributions include capital calls; yield uniqueness has not been established",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "SNOW"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "VALE"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "eligible",
+          "symbol": "VICI"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "AIG"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "ALV.DE"
+        },
+        {
+          "critical_flags": [
+            "unresolved ownership scope: multiple share classes or partnership units require economic-rights reconciliation"
+          ],
+          "implied_return_status": "solved",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "data flag",
+          "symbol": "BN"
+        },
+        {
+          "critical_flags": [
+            "unresolved ownership scope: multiple share classes or partnership units require economic-rights reconciliation"
+          ],
+          "implied_return_status": "not_identified: future distributions include capital calls; yield uniqueness has not been established",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "data flag",
+          "symbol": "BRK-B"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "eligible",
+          "symbol": "DBK.DE"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "not_identified: future distributions include capital calls; yield uniqueness has not been established",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "HDB"
+        }
+      ],
+      "results_sha256": "8eabc86e7fb2b140215276005fa24ef54e197fef4ed9dbef79e704ef1aa00da3",
+      "rows": 12,
+      "statuses": {
+        "data flag": 2,
+        "eligible": 2,
+        "price above ceiling": 8
+      }
+    },
+    "release-original": {
+      "results": [
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "eligible",
+          "symbol": "ADBE"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "not_identified: future distributions include capital calls; yield uniqueness has not been established",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "eligible",
+          "symbol": "NVDA"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "KO"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "XOM"
+        },
+        {
+          "critical_flags": [
+            "unresolved ownership scope: multiple share classes or partnership units require economic-rights reconciliation"
+          ],
+          "implied_return_status": "not_identified: future distributions include capital calls; yield uniqueness has not been established",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "data flag",
+          "symbol": "RIVN"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "not_identified: future distributions include capital calls; yield uniqueness has not been established",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "SHOP.TO"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "not_identified: future distributions include capital calls; yield uniqueness has not been established",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "TSM"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "not_identified: future distributions include capital calls; yield uniqueness has not been established",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "eligible",
+          "symbol": "2330.TW"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "not_identified: future distributions include capital calls; yield uniqueness has not been established",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "ASML.AS"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "eligible",
+          "symbol": "7203.T"
+        },
+        {
+          "critical_flags": [
+            "unresolved ownership scope: multiple share classes or partnership units require economic-rights reconciliation"
+          ],
+          "implied_return_status": "solved",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "data flag",
+          "symbol": "RIO.L"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "BHP.AX"
+        },
+        {
+          "critical_flags": [
+            "unresolved ownership scope: multiple share classes or partnership units require economic-rights reconciliation"
+          ],
+          "implied_return_status": "solved",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "data flag",
+          "symbol": "PLD"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "NEE"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "operating_equity",
+          "not_rankable": "",
+          "status": "eligible",
+          "symbol": "0700.HK"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "JPM"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "solved",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "MUV2.DE"
+        },
+        {
+          "critical_flags": [],
+          "implied_return_status": "not_identified: future distributions include capital calls; yield uniqueness has not been established",
+          "model": "equity_residual_income",
+          "not_rankable": "",
+          "status": "price above ceiling",
+          "symbol": "NU"
+        }
+      ],
+      "results_sha256": "2a7d578f6fdc63dbdf666989ea660582de55ea917bee980b4aa9b5aa9fdde6b0",
+      "rows": 18,
+      "statuses": {
+        "data flag": 3,
+        "eligible": 5,
+        "price above ceiling": 10
+      }
+    }
+  },
+  "dashboard": {
+    "checks": [
+      {
+        "passed": true,
+        "required": [
+          "Forecast assumptions",
+          "Scenario envelope",
+          "Yield identification"
+        ],
+        "symbol": "ADBE"
+      },
+      {
+        "passed": true,
+        "required": [
+          "Forecast assumptions",
+          "Scenario envelope",
+          "Yield identification"
+        ],
+        "symbol": "JPM"
+      },
+      {
+        "passed": true,
+        "required": [
+          "Forecast assumptions",
+          "Scenario envelope",
+          "Yield identification"
+        ],
+        "symbol": "NEE"
+      },
+      {
+        "passed": true,
+        "required": [
+          "Forecast assumptions",
+          "Scenario envelope",
+          "Yield identification"
+        ],
+        "symbol": "RIVN"
+      },
+      {
+        "passed": true,
+        "required": [
+          "Business components",
+          "bank",
+          "factory",
+          "Parent adjustments"
+        ],
+        "symbol": "EXAMPLE_DIVERSIFIED"
+      }
+    ],
+    "errors": [],
+    "horizontalOverflow": false
+  },
+  "date": "2026-10-11",
+  "filing_comparisons_retained": 148,
+  "industry_reference": {
+    "as_of": "2026-01",
+    "geography": "United States",
+    "preserved_html_refresh_numeric_differences": 0,
+    "rows": 96
+  },
+  "limits": [
+    "30 live-acquired listings were replayed from immutable hash-verified snapshots; not 30 independent filing audits.",
+    "131-record corpus is frozen, overlaps live cohorts and is not a predictive holdout.",
+    "FDY.TO has partial asset recovery only; mineral/project/franchise cash flows are unvalued.",
+    "Future forecasts, terminal economics, maintenance, capital allocation and financing access are assumptions."
+  ],
+  "new_heldout_issuer_overrides": false,
+  "package": "wheel built; all general modules and industry resource included; isolated import passed",
+  "tests": {
+    "failed": 0,
+    "log": "data/general-models-2026-10-11/full-tests-release-ui.txt",
+    "passed": 492
+  },
+  "tsm_ordinary_adr_control": "identical base parameters and aggregate common-equity valuation"
+}

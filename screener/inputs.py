@@ -5,20 +5,23 @@ from pathlib import Path
 import math
 import tomllib
 
-MODELS={"operating_forecast","bank_capital","insurer_capital","financial_capital","reit_affo","regulated_rate_base","asset_nav","finite_project"}
+MODELS={"operating_forecast","bank_capital","insurer_capital","financial_capital","reit_affo","regulated_rate_base","asset_nav","finite_project",
+        "equity_residual_income","operating_equity","sum_of_parts","asset_recovery"}
 FAMILIES={"operating","cyclical","bank","insurer","reit","mortgage_reit","regulated","holdco","hybrid","financial_other"}
 COMMON={"source","as_of","period_end","currency","model","model_family","base","stress","country_risk_premium",
         "market_cap_quote","market_cap_as_of","market_cap_basis","ownership_reconciled","debt","cash","equity","common_equity","minority","goodwill","preferred","other_claims",
         "tax_rate","marginal_return","terminal_return","discount_rate","discount_rate_basis",
         "geographic_exposures","capital_scope","forecast_source","sec_cik",
-        "statement_rounding_unit","filing_checks","lease_cashflow_reconciled","ownership_common_shares"}
+        "statement_rounding_unit","filing_checks","lease_cashflow_reconciled","ownership_common_shares","gics","segments","upside",
+        "reported_property","regulatory","earnings_estimate_units"}
 PARAMETERS={"source","revenue","growth","margin_start","margin_terminal","tax_rate","sales_to_capital",
             "maintenance_net_capex","funding_capacity","net_income","available_capital","capital_base",
             "required_capital_ratio","capital_growth","payout_limit","releasable_excess","release_terminal_excess","excess_income_excluded",
             "ffo_common","recurring_capex","leasing_costs","return_on_new_equity","terminal_return",
             "rate_base","rate_base_history","earned_after_tax_return","regulatory_lag_years","attributable_assets","parent_debt",
             "other_claims","tax_leakage","holding_cost_pv","cashflows","salvage_value","closure_cost",
-            "discount_rate","terminal_growth"}
+            "discount_rate","terminal_growth","common_equity","roe_start","roe_terminal","book_growth_start",
+            "roe_path","book_growth_path","earnings_basis","equity_to_sales","terminal_equity_return","total_assets","asset_recovery_value"}
 
 def validate_issuer(symbol:str,p:dict, evaluation_date:date|None=None) -> list[str]:
     errors=[]
@@ -51,7 +54,7 @@ def validate_issuer(symbol:str,p:dict, evaluation_date:date|None=None) -> list[s
             if check.keys()-allowed:errors.append(f"{symbol}: unknown filing-check fields")
             if check.get("statement") not in ("income","balance","cashflow") or not isinstance(check.get("field"),str) or check["field"] not in ROWS:
                 errors.append(f"{symbol}: unsupported filing-check statement/field")
-            if check.get("period_type") not in ("instant","annual","ttm") or ((check.get("statement")=="balance") != (check.get("period_type")=="instant")):
+            if check.get("period_type") not in ("instant","annual","ttm","quarter") or ((check.get("statement")=="balance") != (check.get("period_type")=="instant")):
                 errors.append(f"{symbol}: incompatible filing-check duration")
             if check.get("relation","equal") not in ("equal","minimum","maximum"):
                 errors.append(f"{symbol}: unsupported filing-check relation")
@@ -82,12 +85,48 @@ def validate_issuer(symbol:str,p:dict, evaluation_date:date|None=None) -> list[s
         for case in ("base","stress"):
             if not isinstance(p.get(case),dict) or "discount_rate" not in p[case]:
                 errors.append(f"{symbol}.{case}: an intrinsic rate must be supplied, not replaced by the policy hurdle")
-    for case in ("base","stress"):
+    if 'gics' in p:
+        g=p['gics']
+        if not isinstance(g,dict) or not isinstance(g.get('source'),str) or not g['source'].strip():errors.append(f'{symbol}: GICS needs a source-labeled table')
+        else:
+            try:
+                if date.fromisoformat(str(g['as_of']))>(evaluation_date or date.today()):raise ValueError()
+            except (KeyError,ValueError):errors.append(f'{symbol}: GICS needs a nonfuture as_of date')
+    if 'segments' in p and (not isinstance(p['segments'],list) or not all(isinstance(s,dict) and s.get('source') for s in p['segments'])):
+        errors.append(f'{symbol}: segments must be source-labeled tables')
+    for key in ('reported_property','regulatory'):
+        if key in p:
+            block=p[key]
+            if not isinstance(block,dict) or not isinstance(block.get('source'),str) or not block['source'].strip():errors.append(f'{symbol}: {key} requires a source-labeled table')
+            elif block.get('currency')!=p.get('currency'):errors.append(f'{symbol}: {key} currency differs from issuer currency')
+            else:
+                try:
+                    if date.fromisoformat(str(block['period_end']))>date.fromisoformat(str(p['as_of'])):raise ValueError()
+                except (KeyError,ValueError):errors.append(f'{symbol}: {key} requires a nonfuture period_end')
+    if 'earnings_estimate_units' in p:
+        unit=p['earnings_estimate_units']
+        if not isinstance(unit,dict) or not isinstance(unit.get('source'),str) or not unit['source'].strip():
+            errors.append(f'{symbol}: earnings_estimate_units requires a sourced table')
+        else:
+            if unit.get('currency')!=p.get('currency'):errors.append(f'{symbol}: earnings-estimate unit currency differs from issuer')
+            for key in ('as_of','statement_period_end'):
+                try:
+                    if date.fromisoformat(str(unit[key]))>(evaluation_date or date.today()):raise ValueError()
+                except (KeyError,ValueError):errors.append(f'{symbol}: invalid earnings-estimate unit {key}')
+            factor=unit.get('statement_shares_per_estimate_unit')
+            if isinstance(factor,bool) or not isinstance(factor,(int,float)) or not math.isfinite(factor) or factor<=0:
+                errors.append(f'{symbol}: positive statement_shares_per_estimate_unit required')
+    for case in ("base","stress","upside"):
         if case not in p:continue
         if not isinstance(p[case],dict):errors.append(f"{symbol}.{case}: must be a table");continue
+        if p.get('model')=='sum_of_parts':
+            from .business_models import validate_sum_of_parts
+            errors.extend(f'{symbol}.{case}: {e}' for e in validate_sum_of_parts(p[case]))
+            if p[case].get('currency')!=p.get('currency'):errors.append(f'{symbol}.{case}: component parent currency must match issuer currency')
+            continue
         for k,v in p[case].items():
             if k not in PARAMETERS:errors.append(f"{symbol}.{case}: unknown parameter {k}")
-            if k not in ("source","release_terminal_excess","excess_income_excluded","cashflows","rate_base_history") and (isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v)):
+            if k not in ("source","release_terminal_excess","excess_income_excluded","cashflows","rate_base_history","roe_path","book_growth_path","earnings_basis") and (isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v)):
                 errors.append(f"{symbol}.{case}.{k}: must be finite numeric")
             if k in ("release_terminal_excess","excess_income_excluded") and not isinstance(v,bool):
                 errors.append(f"{symbol}.{case}.{k}: must be boolean")

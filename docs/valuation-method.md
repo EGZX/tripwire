@@ -1,251 +1,172 @@
-# Valuation contracts and supported use
+# General valuation models and evidence contracts
 
-Tripwire is a research screener. Numerical convergence, accounting completeness,
-model applicability and investment predictiveness are separate questions. A
-positive entry score is not a buy recommendation or a probability.
+Tripwire models a listed common-equity claim using reported evidence and explicit
+forecast assumptions. A company is not excluded simply because it is a bank,
+insurer, property company, utility, diversified group, cyclical or loss-making
+business. Numerical validity, model coverage, evidence quality and predictive
+accuracy remain different questions.
 
-## Evidence comes before a price
+## Classification is separate from valuation
 
-Every statement is selected at one coherent period. Trailing income requirements
-depend on the model: financial businesses need common net income, not EBIT.
-Balance selection chooses the newest complete period across quarterly, annual and
-available filing sources. An older complete period keeps its actual date. Missing
-fields are never individually backfilled from another period.
+`business_models.profile` records provider labels, optional source-provided GICS,
+explicit economic-family declarations and segment evidence separately. Provider
+sector/industry labels are never presented as verified GICS. A sourced GICS label
+suggests a route; explicit economic evidence can override it. Unknown labels retain
+a general route with uncertainty. Funds and non-company instruments are excluded.
 
-Debt is either reported, reconstructed from a complete compatible current/long-term
-pair, confirmed by a dated provider aggregate for the exact same period, or supplied
-with a source. Missing rows do not mean zero. Preferred and minority claims can
-also be reconciled from compatible reported equity totals; otherwise they remain
-unknown. Current and historical book equity/debt are not replaced by zero.
+GICS principally classifies a company into one business category. It does not
+establish that every segment has that category's economics. See the
+[GICS methodology](https://www.spglobal.com/spdji/en/documents/methodologies/methodology-gics.pdf).
+The engine supports both consolidated common-equity models and component-level
+sum-of-parts. It never averages component values using revenue percentages.
 
-`statement_periods`, `price_as_of`, quote metadata, FX observation dates, raw source
-hashes, issuer input sources and the model identity are retained in each run.
-Fresh quotes include fresh capitalization/share metadata; cached capitalization
-is not silently rescaled across a split. Failed quote refreshes and stale fallback
-fundamentals prevent candidate status. Freshness policies are explicit in config:
-7 calendar days for quotes, 90 for rates and 270 for statement periods. These are
-operational review intervals, not scientific constants or guarantees of freshness.
+## Evidence assembly
 
-The standard equity bridge includes debt, selected cash, minority and preferred
-claims. Pensions, restricted/operating cash, options, deferred taxes and other claims
-still require issuer-specific review. `other_claims`, `cash` and other sourced
-balance overrides allow that reconciliation. An automatic accounting-proxy output
-does not establish that every unreported claim is absent.
+The original provider record is immutable. `evidence_assembly` selects compatible
+statement periods and reconstructs trailing flows from four consecutive quarters
+when possible. One reported field definition must cover the full window. Annual,
+year-to-date and half-year observations are not silently added as quarters.
+Weighted-average shares and EPS are not additive cash flows.
 
-## Automatic operating-company proxy
+Reported operating profit takes precedence over provider-standardized operating
+income. Provider totals, quarter sums, source rows, dates, accounting-basis
+conflicts and claim alternatives remain in the ledger. Filing checks apply to
+current and historical inputs actually used by a model. An unresolved debt
+reference does not invalidate a model that values common earnings without a
+second debt bridge; an unresolved earnings fact used by that model does.
 
-For a profitable company with sufficient data:
+Missing debt, cash or noncommon claims remain unknown. Alternative capitalization
+or accounting interpretations are conditional hypotheses, not verified bounds.
+When market cap is missing but a dated quote and share count exist, the explicit
+quote/count proxy permits a conditional comparison and blocks candidate status
+until its economic units are reconciled. Quote currency, statement currency,
+minor units, ADRs and common-share economic rights remain separate.
 
-- Base earnings are operating income times one minus the observed effective tax
-  rate, unless a sourced normalized rate is provided. Missing or invalid tax rates
-  are not replaced by 21% or clipped to 35%.
-- Growth is a disclosed, bounded blend of historical revenue growth and provider
-  next-fiscal-year growth. It is still a constant-margin earnings-growth proxy, not
-  a complete operating forecast. Declines below the configured screening domain
-  require an explicit recovery/finite-life model; they are not clipped into a
-  less severe decline to produce a score. Analyst ranges, counts, currency and period are
-  retained; low/high analyst estimates are not confidence intervals.
-- Accounting ROIC includes acquisition capital. Ex-goodwill ROIC is diagnostic,
-  not assumed to measure organic marginal returns. Nonpositive/unavailable invested
-  capital does not receive the highest permitted return. A sourced `marginal_return`
-  can replace the proxy.
-  Consolidated capital includes noncontrolling interests; common and total parent
-  equity are distinct. Opening/closing capital is matched to a calendar/52-/53-week
-  earnings window when available. Otherwise the closing-capital proxy and its
-  period limitation are explicit. Unrelated fiscal year-ends are not a TTM average.
-- Growth must be funded in every explicit period and in perpetuity. Negative
-  growth generates no automatic liquidation proceeds. A financing violation
-  produces an invalid-model result instead of a favorable score.
-- In the absence of a sourced `terminal_return`, return on new capital fades to
-  the lower of the initial proxy and policy hurdle. This is an explicit screening
-  assumption; it is not calibrated evidence about competitive-advantage duration.
-- Observed net investment, acquisition cash flow, R&D and the difference between
-  observed and modeled investment are shown for reconciliation. A large difference
-  is not automatically classified as fraud, maintenance capex or growth capex.
+## Automatic model families
 
-Short cyclical histories use nonoverlapping annual margins, without adding an
-overlapping TTM as an independent year. These outputs carry a critical cycle-proxy
-flag; source-backed through-cycle operating forecasts are needed for eligibility.
-Raw losses are not automatically treated as proof of permanent failure: a funded
-operating forecast can model a documented recovery.
-
-## Sector models
-
-Put researched assumptions in `overrides/valuation.toml` or the git-ignored
-`overrides/valuation.local.toml`. See `examples/valuation.toml`. Each issuer needs
-source, observation date, accounting period end, reporting currency, and complete
-base/stress scenarios. Dates cannot be in the future or precede the accounting
-period. All monetary values use the reporting currency, not thousands/millions or
-quote minor units. Percentages are annual decimal fractions.
-
-Quote dotted tickers in TOML, for example `[issuers."MUV2.DE"]` and
-`[issuers."MUV2.DE".base]`. A source-backed `model_family` may correct an absent
-or incorrect provider classification; its model still has to satisfy that
-family's input/claim contracts. Mortgage REITs require an asset-value route, not
-the property-FFO model. Missing industry data does not silently imply an
-ordinary operating business.
-
-| Model | Cash-flow claim | Required economic inputs |
+| Economics | Model and observable evidence | What remains estimated |
 |---|---|---|
-| `operating_forecast` | Firm | Revenue, starting growth, starting/terminal margins, tax rate, sales-to-capital ratio, sustaining net capex, funding capacity. Revenue and margin evolve separately. |
-| `bank_capital` | Common equity | Common net income, income growth, capital-base growth, available regulatory common capital, risk-weighted capital base, required capital ratio, payout limit, explicitly releasable excess. |
-| `financial_capital` | Common equity | Broker/other financial distributions using a documented common-capital requirement base and matching ratio; never assume bank RWA definitions apply to a broker. |
-| `insurer_capital` | Common equity | Same capital-distribution machinery, with an insurance risk base and matching solvency-capital ratio; it must not mix CET1, total own funds and common equity. Income must reflect underwriting/reserve/investment assumptions. |
-| `reit_affo` | Common equity | Common-holder FFO after financing costs, recurring property capex, leasing costs, growth and return on new equity. This is not appropriate for mortgage REITs without a different equity-capital model. |
-| `regulated_rate_base` | Firm | Net regulatory rate base, growth, achieved after-tax return, integer regulatory lag, actual opening rate-base history, funding capacity. The lag pipeline clears before terminal valuation. |
-| `asset_nav` | Common equity | Attributable assets, parent debt, other claims, tax leakage and present value of holding costs. Ownership, cross-holdings and parent/subsidiary boundaries must already be reconciled. |
-| `finite_project` | Firm | Explicit annual cash flows, salvage, closure costs and funding capacity. There is no perpetual terminal growth. Closure funding is checked. |
+| Operating, growth and cyclical | Revenue, common net margins, observed equity-capital intensity and dated industry references | Future growth, margin convergence, marginal equity investment and financing convention |
+| Banks, insurers and financial businesses | Common earnings, common book equity, retained-capital history; distributions reconcile independently to residual income | Future returns, capital allocation, regulatory constraints and credit/catastrophe outcomes |
+| Property | Compatible reported common AFFO/FFO when supplied; otherwise explicitly estimated common-income/cash-return and maintenance scenarios | Maintenance allocation, growth investment, partnership scope and asset economics |
+| Utilities and mixed infrastructure | Consolidated common earnings and investment evidence | Regulatory lag, merchant exposure and future allocation; total assets are not assumed to be rate base |
+| Holdings and diversified groups | Consolidated common-equity model, or sourced business-component SOTP | Future mix and component assumptions when segment detail is absent |
+| No positive operating revenue | Explicit balance-sheet recovery hypotheses | Project, mineral, clinical and future-franchise value remains unquantified; partial coverage blocks candidate status |
 
-For regulatory lag L, `rate_base_history` contains L+1 actual bases, oldest to
-newest, ending at `rate_base`. For bank/insurance models, `capital_base` and
-`required_capital_ratio` must refer to the same regulatory denominator and common
-capital claim. Book equity/assets is only a descriptive flag, not a substitute.
-Capital released immediately or at the horizon requires
-`excess_income_excluded = true`: forecast income must exclude earnings on that
-released excess. Retained capital that is not explicitly permitted to be released
-is not credited as an immediate dividend. Payout and growth constraints remain
-explicit assumptions, not an automated solvency assessment.
+The automatic operating model uses common earnings after financing and tax.
+It does not subtract debt, cash, preferred claims or leases a second time. This
+avoids combining expensed operating leases with another full lease-debt deduction.
+It does not imply that financing or lease economics are known perfectly.
 
-Financing capacity is a documented availability bound, not an invented source of
-free capital. It does not establish intrayear liquidity, future financing terms or
-the viability of a distressed firm. High-growth equity issuance, convertible
-instruments and major changes in capital structure require a separately reconciled
-ownership/funding case before using the resulting per-share price.
+Existing explicit firm forecasts, regulatory-capital distributions, property AFFO,
+regulated rate-base, NAV and finite-project models remain available for better
+issuer evidence. Firm models require a complete firm-to-common bridge and a
+matching discount-rate claim.
 
-Banks, insurers, property businesses, regulated utilities and financial hybrids
-without required sector evidence abstain rather than inherit a generic earnings
-equation. Holdcos and preprofit issuers can use an applicable explicit model. Funds
-remain outside the single-company models.
+## Forecasts, investment and capital calls
 
-## Value, purchase policy and inverse problems
+The operating projection funds first-year expansion at the opening date and later
+expansion from the preceding period. Future equity investment per added revenue
+converges to the stated mature earning-power/return assumption. Contraction does
+not automatically sell assets at book value. A negative net distribution is a
+priced contribution by existing owners, not free new-share funding.
 
-Firm flows use a declared WACC/unlevered rate; equity flows use cost of equity.
-`discount_rate_basis = "policy"` explicitly denotes a purchase-policy calculation.
-The code rejects equity-rate/firm-flow and WACC/equity-flow mismatches. With a
-sourced intrinsic discount rate, modeled base value and purchase-policy ceiling
-are separate outputs. The entry ceiling is the lower of the base value and the
-value of the same base cash flows at the configured purchase hurdle. Thus a low
-policy hurdle cannot authorize paying above the source-assumed risk valuation;
-no adverse growth scenario is mixed into this constraint. The unconstrained
-policy value is retained for inspection. Sourced WACC/unlevered rates also work
-with the automatic operating proxy; an equity rate is rejected for its firm flows. Static NAV uses NAV as its ceiling and does not imply a return
-hurdle or an expected shareholder return.
+The financial/common-equity kernel uses:
 
-The automatic operating proxy supplies a policy ceiling, not an intrinsic value.
-The policy rate is currency yield plus the configured premium and geographic risk,
-subject to explicit configured floors. Country risk is not derived from reporting
-currency. Sourced `geographic_exposures` weights or a sourced issuer premium take
-priority over the labeled provider-country proxy. Proxy premiums migrated from the old
-configuration are policy assumptions, not newly researched market estimates.
-Custom configurations with a nonzero currency-level `crp` are rejected explicitly;
-move that assumption to the appropriate country/exposure input rather than
-quietly continuing the currency/geography conflation.
+- earnings = opening common book equity x scenario return;
+- net owner distribution = earnings - change in common equity;
+- value = discounted distributions plus the stated terminal franchise value.
 
-Base and automatic operating stress use the same discount rate. A user-supplied
-joint rate/operating scenario must be read as such. Lower growth can raise value
-when investment destroys value; scenario crossings are reported rather than
-clipped or reordered to manufacture downside. Stress values are not calibrated
-confidence limits or probabilities.
+It independently checks the equivalent residual-income identity. Common book
+capital is not represented as regulatory capital. Missing regulatory forecasts
+are disclosed limitations, not proof that a bank has no valuation model. More
+specific regulatory-capital forecasts can use the explicit capital model.
+[Financial-service valuation reference](https://pages.stern.nyu.edu/~adamodar/pdfiles/papers/finfirm09.pdf).
 
-`solve_growth` reports `solved`, `nonunique`, `weakly_identified`, `indeterminate`,
-`no_solution`, `outside_domain`, `invalid`, `unsupported` or `unresolved` as
-appropriate. A scalar is supplied only for a numerically resolved unique root.
-Root residuals and alternative roots are retained. The self-funded domain checks
-subsequent growth funding; first-year growth uses already invested opening capital.
-Monotone cases use direct bracketing. Funded-growth inversion uses piecewise
-polynomials partitioned by derivative roots, including turning-point checks.
+All base, stress and upside assumptions are retained. Scenario extrema are not
+probability quantiles, guaranteed bounds or backtested safety margins. Large
+future owner contributions are shown in reporting-currency units and already
+reduce value. Participation, financing availability and dilution to owners who
+do not participate are not assured.
 
-Growth inversion is limited to -90%..300% starting growth and at most 50 explicit
-years, further restricted by financing feasibility. Very long horizons and wide
-return/growth domains can be ill-conditioned; an unresolved result is an
-intentional abstention, not permission to loosen the residual check. Finite payout
-paths do not inherit a Gordon-bound restriction when their terminal payout is zero.
+A nonpositive modeled continuation value produces a zero common-equity endpoint,
+with the negative underlying continuation result retained where applicable.
+It does not prove that default, recovery or abandonment options have zero value.
+The displayed -100 score at a zero ceiling is the limiting display endpoint;
+the ratio itself is not fabricated as a finite raw score.
 
-The implied cash-flow yield identifies its firm/equity claim. `fx_parity_return`
-is an illustrative compound-rate parity scenario, not expected unhedged EUR return
-or an executed currency hedge.
+## International estimates and industry references
 
-## International ownership and optional filings
+Annual EPS estimates need fiscal-period, currency and economic share-unit
+reconciliation. Same currency alone is insufficient for an ADR or another class.
+Unproved estimates remain in evidence with a rejection reason; reported common
+income still supplies a model. Optional `earnings_estimate_units` source metadata
+can prove a conversion; its `as_of` uses the immutable estimate snapshot's UTC
+date, not the date of a later quote refresh. Its statement share field and period
+must match the denominator. No ratio is inferred from prices alone.
 
-Provider cap, quote units, implied/current shares, common earnings and consolidated
-earnings are checked for incompatible ownership scopes. A multiclass share-count
-difference alone is not treated as an error. An unresolved combination with
-noncommon earnings requires reconciliation. Source-backed
-`market_cap_basis = "listed_shares"` with `ownership_reconciled = true` values the
-verified listed common claim using refreshed shares/price. Do not apply that rule
-globally to ADRs or companies with other common classes. A direct
-`market_cap_quote` override requires `market_cap_as_of` matching the quote date.
+Operating base assumptions use issuer-level margins and revenue evidence, so
+listing-specific EPS panels do not create different base business values for an
+ADR and its ordinary shares. Compatible EPS forecasts enrich scenario evidence.
 
-With an explicit `sec_cik` and a configured `SEC_USER_AGENT`, the CLI retrieves and
-preserves SEC companyfacts. Publication-date and currency selection are tested.
-Only mapped whole-entity US-GAAP instant concepts feed the balance selector;
-incomplete debt components cannot become total debt. Custom concepts, segments,
-most regulatory-capital facts and IFRS mapping are not automatically interpreted.
-An unavailable configured filing check is visible. No API credential is embedded.
+The packaged industry reference is dated, independent of the watchlist, and
+explicitly US-based. It is not GICS or a company forecast. Own history remains the
+primary evidence; an unmapped industry uses a disclosed broad reference rather
+than a hidden ticker exception. Source metadata and resource hashes are retained.
+Refresh explicitly with `python tools/refresh_industry_references.py`. Parsing,
+units, observation month, industry populations and fallback availability are
+validated before atomic replacement; failed refreshes preserve the old snapshot.
+[Margin data](https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/margin.html),
+[capital-investment data](https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/capex.html).
 
-Sources: [SEC API contracts](https://www.sec.gov/search-filings/edgar-application-programming-interfaces),
-[yfinance financials](https://ranaroussi.github.io/yfinance/reference/yfinance.financials.html),
-[yfinance analyst data](https://ranaroussi.github.io/yfinance/reference/yfinance.analysis.html),
-[cash-flow/rate matching](https://pages.stern.nyu.edu/adamodar/New_Home_Page/lectures/approach.html),
-[terminal consistency](https://pages.stern.nyu.edu/~adamodar/New_Home_Page/valquestions/termvalueexreturns.htm),
-[country exposure](https://pages.stern.nyu.edu/~adamodar/New_Home_Page/valquestions/CountryRisk.htm).
+Rates remain declared valuation/purchase-policy assumptions. A sourced equity
+rate and the policy hurdle value the same cash-flow path separately; the entry
+ceiling satisfies both price constraints. WACC requires a firm model. Missing
+local rates can use an explicit constant-FX/base-currency policy scenario. This
+is not an assertion about future exchange rates or currency-neutral risk.
 
-## Validation and reproducibility
+## Diversified businesses and sum-of-parts
 
-Run the full pytest suite. The audit regressions cover unfunded terminal growth,
-contraction, nonunique/tangent roots, unit invariance, financial TTM selection,
-period dating, missing capital, ownership, minor units and rate geography. Sector
-tests use independent stationary/reference calculations and explicit failure cases.
+A `sum_of_parts` model declares each component's model, source, cash-flow claim,
+ownership, currency, FX conversion and discount basis. Firm values receive their
+component-only bridge before ownership and FX; common-equity values do not receive
+another debt deduction. Parent-only cash, claims and corporate costs apply once.
+Stable claim IDs detect duplicated debt/cash/costs across components and parent.
+Negative subsidiary equity needs an explicit limited-liability or support
+assumption. Cross-currency components also require their own terminal assumptions.
 
-`tools/validate_corpus.py` replays a specified local cache with an explicit valuation date and frozen FX
-file, checks every scored funding path, and records source/config hashes. It does
-not download data or regenerate golden expectations. Existing golden fixtures are
-local and optional; after reviewing intentional model changes, update only the
-current checkout's golden snapshot. Preserve before/after comparisons.
+Component discount rates govern SOTP. Changing an unrelated parent context rate
+does not silently reprice components or assert that a parent purchase hurdle was
+satisfied. The output states this distinction. Source-labeled segment metadata
+can coexist with a consolidated model when segment forecasts are not supplied;
+that coverage limitation stays visible.
 
-Each production report keeps its configuration and implementation hashes under
-`data/history/provenance/`. Raw fetched fundamentals and optional filings are
-immutable snapshots. These controls support prospective and limited filing-based
-point-in-time analysis; they do not supply global historical consensus, a
-survivorship-free universe or an investment-return validation.
+## Ranking and controls
 
-A replay date fixes freshness checks for reproducibility. It does not turn later
-restated provider data into point-in-time evidence; the raw snapshot/publication
-dates must still precede any historical decision being studied.
+A stock can have a conditional valuation without qualifying as a candidate.
+Missing essentials, invalid economic domains and contradictory used evidence
+can still prevent valuation. Stale quotes, unresolved quote units, unverified
+ownership/capitalization and partial asset coverage can block candidate status
+while preserving a numeric comparison. Missing a sector-specific manual forecast
+is no longer a blanket blocker.
 
-The revenue/sales-to-capital forecast uses a same-year investment convention and
-a constant supplied tax rate. It does not infer construction lead times or NOL
-utilization; use a suitable explicit project/regulatory case where those drive
-value. FX timestamps identify provider observations/daily bars, not guaranteed
-synchronized intraday execution prices.
-## Filing reconciliation controls
+The inspector and exports show the chosen model, selection reason, scenario
+range, assumptions, uncertainties and modeled capital contributions. Old growth
+clamps, book-ROIC caps and sector-exclusion settings were retired with the previous
+funded-proxy default; they are no longer dashboard controls. Historical saved
+reports retain their original numbers and model labels.
 
-The October 2026 live audit is documented in
-[live-validation-2026-10-11.md](live-validation-2026-10-11.md), with a public
-fact ledger and locally retained immutable provider/source evidence.
+A priced path with nonnegative future distributions and at least one positive
+payment identifies a unique cash-flow yield. Opening contributions increase the
+initial investment and do not destroy uniqueness. Signed future distributions
+remain valid valuation inputs, but a single yield is withheld unless uniqueness
+is established. Finite distributions permit returns above -100%; positive
+perpetuities require return above terminal growth. The numerical search reports
+an explicit outside-domain result above its 300% upper bound. Multi-driver
+scenarios do not identify a unique market-implied growth rate.
 
-Reported operating profit (`Total Operating Income As Reported`) takes priority
-over provider-standardized operating income and EBIT. Standardization can exclude
-recurring operating costs; any analyst normalization must be justified separately.
-Outputs identify the selected field. Four consecutive quarter totals are compared
-with TTM fields when both exist. Small discrepancies are not silently dismissed:
-an issuer's sourced `statement_rounding_unit` specifies the reporting precision,
-and applies only to the declared period. Five independently rounded observations
-allow at most 2.5 times that unit of aggregate discrepancy.
-
-Optional `filing_checks` declare a statement, field, duration, period, currency
-(inherited from issuer inputs), value, source and optional reported fiscal date.
-Checks never overwrite data. Incomparable declared accounting bases block the
-inference even when numbers agree; a later period does not inherit an earlier
-check. Minimum/maximum checks require an economically valid bound, not a guessed
-replacement value. Cross-basis references must disclose both bases.
-
-Known provider lease obligations trigger a candidate gate unless a sourced
-`lease_cashflow_reconciled` declaration covers the selected income and balance
-period. That declaration must reconcile the treatment of leases in operating
-earnings, capital and noncommon claims; it is not permission to assume lease
-obligations are zero. Complete issuer balance overrides cannot conceal known
-same-period provider leases. Reconciliation needs renewal when periods change.
-For share classes, an optional `ownership_common_shares` count binds a sourced
-ownership clearance to current aggregate common shares; count differences alone
-do not prove that parent earnings have been paired with subsidiary equity.
+Validation covers cash-flow/accounting identities, claim matching, negative
+profits/contributions, fiscal periods, units, ADR equivalence, unseen issuers,
+portfolio independence, source conflicts and package/runtime integration. It
+establishes mathematical/implementation evidence, not investment predictiveness.
+Experimental probabilistic models and fitted trading claims remain separate.

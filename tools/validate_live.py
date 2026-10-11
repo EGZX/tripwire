@@ -72,7 +72,8 @@ def main(argv=None):
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--valuation-date", type=date.fromisoformat, required=True)
     parser.add_argument("--replay", type=Path, help="prior acquisition directory; no network")
-    parser.add_argument("--symbols", nargs="+", choices=list(COHORT))
+    parser.add_argument("--symbols", nargs="+", help="Yahoo symbols; defaults to the representative cohort")
+    parser.add_argument("--no-issuer-overrides", action="store_true", help="Evaluate general models without company-specific inputs or class overrides")
     args = parser.parse_args(argv)
     if any((args.output_dir / name).exists() for name in ("cache", "acquisition.json", "results.csv", "results.json")):
         parser.error("output already contains an acquisition or results; choose a new directory")
@@ -80,6 +81,9 @@ def main(argv=None):
     cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8"))
     cfg["issuer_inputs"] = inputs.load(ROOT / cfg["inputs"].get("valuation_overrides", "overrides/valuation.toml"))
     overrides = load_class_overrides(ROOT / cfg["inputs"]["classification_overrides"])
+    if args.no_issuer_overrides:
+        cfg['issuer_inputs']={}
+        overrides={}
     source = args.replay or args.output_dir
     prior = json.loads((source / "acquisition.json").read_text()) if args.replay else None
     cohort = args.symbols or (list(prior["cohort"]) if prior else list(COHORT))
@@ -106,12 +110,14 @@ def main(argv=None):
     frame.to_csv(args.output_dir / "results.csv", index=False)
     (args.output_dir / "results.json").write_text(frame.to_json(orient="records", indent=2), encoding="utf-8")
     receipt = {"retrieved_at": datetime.now(timezone.utc).isoformat(), "valuation_date": str(args.valuation_date),
-               "mode": "replay" if prior else "live", "cohort": {s: COHORT[s] for s in cohort},
+               "mode": "replay" if prior else "live", "cohort": {s: COHORT.get(s,'additional validation issuer') for s in cohort},
                "records": acquisition, "fx": fx.observations(), "failures": failures,
                "classification_overrides": overrides, "issuer_inputs": cfg["issuer_inputs"],
+               "no_issuer_overrides": args.no_issuer_overrides,
                "parent_acquisition": {"path":str((source/"acquisition.json").resolve()),"sha256":hashlib.sha256((source/"acquisition.json").read_bytes()).hexdigest()} if prior else None,
                "config_sha256": hashlib.sha256((ROOT / "config.toml").read_bytes()).hexdigest(),
                "implementation_sha256": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (ROOT / "screener").glob("*.py")}}
+    receipt['resource_sha256']={str(p.relative_to(ROOT/'screener')):hashlib.sha256(p.read_bytes()).hexdigest() for p in (ROOT/'screener/resources').glob('*.json')}
     (args.output_dir / "acquisition.json").write_text(json.dumps(receipt, indent=2, default=str), encoding="utf-8")
     print(json.dumps({"records": len(frame), "failures": failures, "statuses": frame["status"].value_counts().to_dict() if len(frame) else {}}, indent=2))
     return bool(failures)

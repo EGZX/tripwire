@@ -19,13 +19,13 @@ COLUMNS = {  # column -> (header, number format)
     "symbol": ("Symbol", None), "name": ("Name", None), "owned": ("Owned", None),
     "position_eur": ("Position €", "#,##0"), "cost_px": ("Your avg cost", PX), "cost_score": ("Score at your cost", "0"), "class": ("Class", None), "status": ("Status", None),
     "candidate": ("Candidate", None), "entry_score": ("Entry score", "0"), "price": ("Price", PX),
-    "quote_ccy": ("Ccy", None), "ceiling_px": ("Policy max entry", PX), "reasonable_px": ("Modeled base value", PX),
+    "quote_ccy": ("Ccy", None), "ceiling_px": ("Model entry estimate", PX), "reasonable_px": ("Modeled base value", PX),
     "adverse_px": ("Operating stress value", PX), "adverse_score": ("Stress score", "0"),
     "implied_return": ("Implied cash-flow yield", PCT), "fx_parity_return": ("FX-parity scenario", PCT),
     "hurdle": ("Hurdle", PCT), "floor_rate": ("Stress rate", PCT), "caps_hit": ("Caps hit", None), "fin_type": ("Fin. type", None),
     "implied_growth": ("Implied growth", PCT), "est_growth": ("Est. growth", PCT), "adverse_growth": ("Adverse growth", PCT),
     "terminal_growth": ("Terminal growth", PCT), "return_on_capital": ("Return on capital", PCT),
-    "reinvest_rate": ("Reinvestment rate", PCT), "nopat_yield": ("NOPAT / EV", PCT), "fcf_yield": ("FCF-SBC / EV", PCT),
+    "reinvest_rate": ("Reinvestment rate", PCT), "nopat_yield": ("NOPAT / EV", PCT), "fcf_yield": ("FCF-SBC / equity cap", PCT),
     "ebit_yield": ("EBIT / EV", PCT), "evs_vs_hist": ("EV/Sales vs 5y median", "0.00"),
     "earnings_yield": ("Earnings yield", PCT), "book_yield": ("Book / Mcap", "0.00"), "roe": ("ROE", PCT),
     "equity_to_assets": ("Equity / assets", PCT), "composite": ("Peer percentile", "0"), "score_value": ("Value pct", "0"),
@@ -48,8 +48,16 @@ COLUMNS.update({"decision_rate":("Required rate",PCT),"discount_rate":("Valuatio
     "terminal_value_fraction":("Terminal PV share",PCT),"price_as_of":("Quote as of",None),
     "country_risk_basis":("Country-risk basis",None),"statement_periods":("Statement provenance",None),
     "assumptions_source":("Issuer assumptions source",None),"reinvestment_gap":("Investment reconciliation gap",PX)})
+COLUMNS.update({'model_status':('Model status',None),'valuation_range_low_px':('Scenario low',PX),
+    'valuation_range_high_px':('Scenario high',PX),'upside_px':('Upside scenario',PX),
+    'funding_required':('Modeled owner capital contributions',PX),'growth_measure':('Growth measure',None),
+    'model_selection_reason':('Model selection',None),'model_assumptions':('Forecast assumptions',None),
+    'model_uncertainties':('Model uncertainty',None),'business_profile':('Classification and business components',None),
+    'implied_return_status':('Yield identification',None)})
 DECISION += ["decision_rate","discount_rate","model_label","model_family","model_quality","valuation_basis","implied_return_claim","implied_growth_status",
              "implied_growth_roots","terminal_value_fraction","price_as_of","country_risk_basis","assumptions_source","reinvestment_gap"]
+DECISION += ['model_status','valuation_range_low_px','valuation_range_high_px','upside_px','funding_required',
+             'growth_measure','model_selection_reason','model_assumptions','model_uncertainties','implied_return_status','business_profile']
 
 TAIL = ["composite", "score_value", "score_quality", "score_growth", "score_balance", "mcap_eur_bn", "currency",
         "sector", "industry", "data_as_of", "lists", "flags", "not_rankable"]
@@ -67,19 +75,19 @@ OTHER_COLS = ["symbol", "name", "owned", "position_eur", "class", "earnings_yiel
               "lists", "flags"]
 
 METHOD = [
-    ("Purpose", "Source-labeled research triage. A policy ceiling is not a verified fair value, expected return or buy signal."),
-    ("Evidence", "Statement columns are selected as coherent periods. Missing facts remain unknown. Periods, quote time, source snapshots and run configuration are retained."),
-    ("Automatic operating proxy", "Positive NOPAT, funded growth and book ROIC including acquisition capital. Book ROIC is not observed marginal ROIC. No automatic capital release on contraction; each period and terminal funding must be feasible."),
-    ("Return persistence", "Absent an explicit sourced return path, ROIC fades to the lower of current ROIC and the policy hurdle. This is a screening assumption, not an estimated competitive-advantage duration."),
-    ("Operating stress", "Base and stress use the same discount rate. Lower growth need not mean lower value when investment destroys value; crossings are disclosed, never sorted or clipped into a false downside bound."),
-    ("Country risk", "Separate from reporting currency. Explicit issuer assumptions override a labeled provider-country proxy. Unknown country risk blocks valuation. Government yields and premiums are policy inputs, not automatically sourced market estimates."),
-    ("Sector models", "Explicit operating forecasts; bank/insurer/broker capital distributions; common-equity REIT AFFO; regulated rate-base cash flows with lag runoff; attributable NAV; finite-life projects with funding/closure costs. Required source-backed inputs cannot be replaced by zeros."),
-    ("Applicability", "Bank/insurance/REIT/regulated/hybrid models require explicit sector inputs. Short cyclical histories are data flags. Preprofit/holdco names can use an applicable sourced model; otherwise they abstain."),
-    ("Entry score", "100 x (1 - market cap / positive policy equity ceiling), displayed with a -100 floor; raw score retained. Eligibility is independent of peers and blocked by missing essentials or critical evidence flags."),
-    ("Implied yield", "Discount rate matching the modeled flow claim: firm yield for FCFF; equity yield for financial distributions. It is not universally a shareholder return. Multiple, weakly identified, invalid and absent growth solutions have separate statuses."),
-    ("FX parity", "An illustrative rate-parity scenario using compound rate ratios, not expected unhedged EUR return or an executed hedge."),
-    ("Claims and cash", "Firm-to-common-equity bridge includes debt, selected cash, minorities and preferred claims. Other claims require issuer review; all-cash treatment and book claims remain proxy assumptions unless explicitly reconciled."),
-    ("Validation boundary", "Counterexample, reference and corpus tests validate mechanics and abstention. They do not establish investment predictiveness. Experimental ideas are excluded from production."),
+    ("Purpose", "Source-labeled research triage. Prices are conditional model estimates, not probabilities or buy recommendations."),
+    ("Evidence assembly", "Coherent reported quarter flows are assembled into TTM where possible. Source rows, periods, units, alternatives and disagreements are retained. Missing financial facts are not replaced by zeros."),
+    ("Classification", "Provider industry labels and source-provided GICS are separate evidence. Economics choose the model; diversified groups are not assumed to be pure-sector businesses."),
+    ("Operating and recovery", "Revenue, reported common net margins and equity investment generate owner cash flows. First-year expansion is funded at the opening date; later expansion is funded in advance. Negative distributions are priced capital calls. Industry references are dated estimates, not company facts."),
+    ("Financial companies", "Common-equity earnings and book reinvestment generate distributions that independently reconcile to residual income. Book equity is not asserted to be regulatory capital. Missing regulatory detail is disclosed uncertainty."),
+    ("Property and utilities", "Compatible reported AFFO/FFO is used when available. Otherwise common-income/cash-return and maintenance scenarios are estimated explicitly. Consolidated utility models include merchant and regulated activities without treating all assets as rate base."),
+    ("Diversified businesses", "Sum-of-parts values each declared component with its own economics, claim, discount rate, ownership and currency. Component and parent claims are reconciled once. Without segment facts, a labeled consolidated common-equity model remains available."),
+    ("Scenarios", "Base, stress and upside preserve assumptions and signed contributions; displayed minima/maxima are scenario envelopes, not confidence bounds. Zero means nonpositive modeled continuation value with limited liability, not proof that recovery options have no value."),
+    ("Funding and claims", "Common-equity models already include financing expenses and do not subtract debt or leases a second time. Owner capital contributions reduce value. Financing availability, participation and dilution remain conditional assumptions."),
+    ("Rates and currency", "A sourced equity discount rate and purchase-policy hurdle value the same path separately; both price constraints apply. WACC requires a firm model. Missing local rates use an explicit constant-FX/base-currency policy scenario. Component-model discount rates are declared separately."),
+    ("Ranking", "A business is not excluded merely because its sector needs a different equation or a forecast estimate. Missing essentials, invalid economics and unresolved used-source contradictions can still prevent a value. Quote/unit/ownership and freshness flags can block candidate status while retaining conditional estimates."),
+    ("Uncertainty", "The inspector and exports show assumptions, model selection, scenario ranges and capital contributions. Retired funded-proxy knobs are no longer active controls. Estimates are independent of which peers appear in a watchlist."),
+    ("Validation boundary", "Accounting identities, adverse cases and held-out issuers validate mechanics and generality. They do not establish forecast accuracy or predictive investment performance. Experimental probability models remain outside production."),
 ]
 
 
@@ -181,8 +189,10 @@ def write(df: pd.DataFrame, resolution: pd.DataFrame, out_dir: Path, history_dir
     provenance=history_dir/"provenance"
     provenance.mkdir(exist_ok=True)
     sources={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(__file__).parent.glob("*.py")}
+    resources={str(p.relative_to(Path(__file__).parent)):hashlib.sha256(p.read_bytes()).hexdigest()
+               for p in (Path(__file__).parent/'resources').glob('*.json')}
     with (provenance/f"{stem}.json").open("x",encoding="utf-8") as fh:
-        json.dump({"run":stem,"date":today,"configuration":cfg,"implementation_sha256":sources,
+        json.dump({"run":stem,"date":today,"configuration":cfg,"implementation_sha256":sources,'resource_sha256':resources,
                    "evidence_columns":[c for c in df.columns if c.startswith("source_") or c.startswith("filing_") or c in ("statement_periods","quote_metadata","price_as_of","fx_observations")]},fh,indent=2,default=str)
 
 
@@ -213,8 +223,8 @@ def write(df: pd.DataFrame, resolution: pd.DataFrame, out_dir: Path, history_dir
         rates = ", ".join(f"{k} {r['rf']:.2%}/{r['g']:.1%}" for k, r in sorted(cfg.get("rates", {}).items()))
         pd.DataFrame(METHOD + [("Equity risk premium", f"{v['equity_risk_premium']:.2%}"),
                                ("Stress discount basis", "same as base"),
-                               ("Adverse growth haircut", f"{v['adverse_growth_haircut']:.1%}"),
-                               ("Horizon / caps", f"{v['years']} years; growth {v['growth_floor']:.0%}..{v['growth_cap']:.0%}; return on capital ≤ {v['return_cap']:.0%}"),
+                               ("Scenario basis", "Observed company ranges, compatible estimates and dated references; see each model's assumptions"),
+                               ("Horizon", f"{v['years']} years"),
                                ("Rates (10y yield / terminal g)", rates)],
                      columns=["Item", "Definition"]).to_excel(w, sheet_name="Method", index=False)
         w.sheets["Method"].column_dimensions["A"].width = 24
@@ -257,12 +267,13 @@ def _markdown(df, cands, ops, fin, pre, blocked, changes, sym_check, cfg, today)
     if shift > 0.25:
         out += [f"**Large shift:** {shift:.0%} of statuses changed since the previous run ({changes.attrs.get('previous_run')}). "
                 "That is usually a data or config problem, not a market move. Check the Data flags and Not rankable sheets before reading the list.", ""]
-    out += [f"Universe {len(df)} names: {len(ops)} operating/cyclical, {len(fin)} financial, {len(pre)} loss-making (not scored), "
+    out += [f"Universe {len(df)} names: {len(ops)} operating/cyclical/asset, {len(fin)} financial, {len(pre)} other loss-making, "
             f"{len(blocked)} not rankable, {len(df) - len(ops) - len(fin) - len(pre)} holdco/fund/other.", "",
            "This is a triage list, not a buy list: candidates need a full valuation before any decision.", "",
-           "Score = 100 × (1 − price / max entry price). Max entry = reasonable-case value at the hurdle; Adv. score = the same against the adverse-case value. "
-           "Impl. return = discount rate at which the funded reasonable-case path equals today's EV. Est. g / Adv. g = starting growth "
-           "in each case; R = return on new capital that growth must be funded at.", "",
+           "Score = 100 × (1 − price / model entry estimate). The entry estimate applies the stated valuation and purchase-policy assumptions. "
+           "Stress score compares price with the stress value. Implied flow yield is reported only when the priced distribution path identifies a unique yield; "
+           "signed future capital calls can leave yield unidentified while still supporting valuation. Growth measures and cash-flow claims depend on the selected model. "
+           "Zero is the limited-liability endpoint of a nonpositive modeled continuation value. Scenario ranges are not confidence bounds.", "",
            f"## Candidates ({len(cands)})", "",
            "Price at or below the max entry price, no critical data flag.", "",
            _table(cands.sort_values("entry_score", ascending=False), 30) if len(cands) else "_None this week._", "",

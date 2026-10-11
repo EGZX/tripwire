@@ -4,7 +4,7 @@ from datetime import datetime,timedelta,timezone,date
 import pandas as pd
 import pytest
 from screener import fetch,statements as S,filings,market
-from test_metrics import operating,run
+from test_metrics import operating,run,CFG
 
 def test_newest_complete_balance_wins_across_statement_sources():
     newer=pd.DataFrame({'2026-06-30':[2.]},index=['Total Assets'])
@@ -42,15 +42,26 @@ def test_roic_matches_the_earnings_window_and_includes_minorities():
     q[pd.Timestamp('2025-06-30')]=q.iloc[:,0]
     q.loc['Stockholders Equity',pd.Timestamp('2025-06-30')]=400
     q.loc['Minority Interest']=200
-    m=run(d)
     # Opening650 and closing850 support consolidated TTM NOPAT168.
-    assert m['roic']==pytest.approx(168/750)
-    assert '2025-06-30 / 2026-06-30' in m['capital_period_basis']
+    capital=S.invested_capital(q)
+    end=pd.Timestamp('2026-06-30')
+    assert capital[pd.Timestamp('2025-06-30')]==650
+    assert capital[end]==850
+    assert S.annual_capital_window(capital,end)==(pd.Timestamp('2025-06-30'),end)
+    average=S.annual_average_capital(capital,end)
+    assert average==750
+    assert 168/average==pytest.approx(.224)
 
-def test_negative_noncommon_book_equity_is_not_added_to_common_value():
+@pytest.mark.parametrize('claim',['Minority Interest','Preferred Stock Equity'])
+def test_negative_noncommon_book_equity_is_not_added_through_a_firm_bridge(claim):
     d=operating()
-    for key in ('balance_sheet','quarterly_balance_sheet'):d[key].loc['Minority Interest']=-50
-    m=run(d)
+    for key in ('balance_sheet','quarterly_balance_sheet'):d[key].loc[claim]=-50
+    case=dict(revenue=1000,growth=0,margin_start=.2,margin_terminal=.2,tax_rate=.25,
+              sales_to_capital=2,maintenance_net_capex=30,funding_capacity=0,terminal_growth=0)
+    supplied=dict(model='operating_forecast',source='controlled firm cash-flow case',as_of='2026-06-30',
+                  period_end='2026-06-30',currency='USD',discount_rate=.1,discount_rate_basis='wacc',
+                  base=case,stress=case)
+    m=run(d,{**CFG,'issuer_inputs':{'TEST':supplied}})
     assert 'negative cash/debt/noncommon' in m['not_rankable']
     assert 'entry_score' not in m
 

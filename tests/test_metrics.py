@@ -1,6 +1,8 @@
 """Entry-ceiling model on synthetic Yahoo-shaped data: scenarios, essentials, period alignment."""
 import math
+import json
 from datetime import date
+from statistics import median
 
 import pandas as pd
 import pytest
@@ -59,30 +61,24 @@ def run(data, cfg=CFG, price=20.0, override=None):
     return metrics.compute(data, price, FX(), cfg, override,valuation_date=date(2026,10,10))
 
 
-def test_operating_entry_ceiling_is_the_reasonable_value_and_adverse_is_scored_separately():
+def test_operating_values_tie_to_common_owner_cashflows_without_second_debt_bridge():
     m = run(operating())
     assert m["not_rankable"] == ""
-    nopat = 210 * (1 - 0.20)                      # TTM EBIT x (1 - tax)
-    assert m["base_earnings"] == pytest.approx(nopat)
-    hurdle, floor, gT = 0.095, 0.095, 0.03
-    assert m["hurdle"] == pytest.approx(hurdle) and m["floor_rate"] == pytest.approx(floor)
-    R = m["return_on_capital"]
-    assert 0 < R <= 0.60
-    g0, g_adv = m["est_growth"], m["adverse_growth"]
-    assert g_adv == pytest.approx(0.5 * min(g0, m["rev_cagr_3y"], m["analyst_growth"]))
-    net_debt = 50
-    reasonable = V.present_value(nopat, g0, hurdle, gT, 10, R, min(R,hurdle)) - net_debt
-    adverse = V.present_value(nopat, g_adv, floor, gT, 10, R, min(R,hurdle)) - net_debt
-    assert m["value_reasonable"] == pytest.approx(reasonable)
-    assert m["value_adverse"] == pytest.approx(adverse)
-    ceiling = reasonable
-    assert m["entry_ceiling"] == pytest.approx(ceiling)
-    assert "binding_case" not in m
-    assert m["adverse_score"] == pytest.approx(max(-100, 100 * (1 - 2000 / adverse)))
-    assert m["entry_score"] == pytest.approx(100 * (1 - 2000 / ceiling))
-    assert m["ceiling_px"] == pytest.approx(20.0 * ceiling / 2000)
-    # implied return solves the same funded path against EV
-    assert V.present_value(nopat, g0, m["implied_return"], gT, 10, R, min(R,hurdle)) == pytest.approx(2050, rel=1e-6)
+    assert m['model']=='operating_equity' and m['implied_return_claim']=='equity'
+    results=json.loads(m['scenario_results'])
+    for case,column in [('base','value_reasonable'),('stress','value_adverse'),('upside','value_upside')]:
+        path=results[case];rate=m['discount_rate']
+        # Independent discounted net-owner receipts, including opening capital.
+        value=path['opening_distribution']+sum(c/(1+rate)**t for t,c in enumerate(path['cashflows'],1))
+        value+=path['terminal_cashflow']/(rate-path['terminal_growth'])/(1+rate)**len(path['cashflows'])
+        assert path['raw_value']==pytest.approx(value)
+        assert m[column]==pytest.approx(max(0.,value))
+    assert results['base']['ledger'][0]['revenue']==pytest.approx(1050*1.1)
+    assert results['base']['ledger'][0]['common_earnings']==pytest.approx(152*1.05*1.1)
+    assert results['base']['opening_distribution']==pytest.approx(-600*.10)
+    ceiling=m['entry_ceiling']
+    assert m['entry_score']==pytest.approx(max(-100,100*(1-2000/ceiling)))
+    assert m['ceiling_px']==pytest.approx(20*ceiling/2000)
 
 
 def test_entry_score_example_from_design():
@@ -98,47 +94,52 @@ def test_absent_debt_is_unknown_not_assumed_zero():
     for key in ("balance_sheet", "quarterly_balance_sheet"):
         d[key] = d[key].drop(index="Total Debt")
     m = run(d)
-    assert "no debt figure" in m["not_rankable"]
+    assert m['not_rankable']==''
     assert math.isnan(m["net_debt_fc"])
+    assert m['entry_ceiling']==pytest.approx(run(operating())['entry_ceiling'])
+    assert 'Unknown is not zero' in m['model_uncertainties']
 
 
-def test_debt_rows_present_but_total_missing_blocks_ranking():
+def test_incomplete_debt_is_not_fabricated_or_deducted_from_common_income():
     d = operating()
     for key in ("balance_sheet", "quarterly_balance_sheet"):
         d[key] = d[key].drop(index="Total Debt")
         d[key].loc["Long Term Debt"] = [math.nan] * len(d[key].columns)
     m = run(d)
-    assert "debt" in m["not_rankable"]
-    assert math.isnan(m.get("entry_score", math.nan))
+    assert math.isnan(m['net_debt_fc'])
+    assert m['entry_ceiling']==pytest.approx(run(operating())['entry_ceiling'])
+    assert m['implied_return_claim']=='equity'
 
 
-def test_missing_balance_sheet_blocks_ranking():
+def test_missing_balance_uses_labeled_external_equity_investment_estimate():
     d = operating(balance_sheet=pd.DataFrame(), quarterly_balance_sheet=pd.DataFrame())
     m = run(d)
-    assert "debt" in m["not_rankable"] and "cash" in m["not_rankable"]
+    assert math.isnan(m['net_debt_fc'])
+    params=json.loads(m['scenario_parameters'])['base']
+    assert params['equity_to_sales']>0
+    assert 'growth assumed fully equity-funded' in m['model_assumptions']
+    assert 'industry_reference' in m['model_evidence']
 
 
-def test_goodwill_is_not_silently_removed_from_incremental_return_proxy():
+def test_goodwill_is_not_silently_removed_from_common_equity_investment_base():
+    baseline=run(operating())
     d = operating()
     for key in ("balance_sheet", "quarterly_balance_sheet"):
         d[key].loc["Goodwill"] = [300.0] * len(d[key].columns)
     m = run(d)
-    nopat = 210 * 0.8
-    invested_avg = 600 + 100 - 50  # no matching June opening balance: explicitly a closing-capital proxy
-    assert m["roic"] == pytest.approx(nopat / invested_avg)                    # reported, incl. goodwill
-    assert m["roic_ex_goodwill"] == pytest.approx(nopat / (invested_avg - 300))
-    assert m["return_on_capital"] == pytest.approx(nopat / invested_avg)
-    assert "proxy" in m["flags"]
+    assert json.loads(m['scenario_parameters'])['base']['equity_to_sales']==pytest.approx(600/1050)
+    assert m['entry_ceiling']==pytest.approx(baseline['entry_ceiling'])
 
 
-def test_non_positive_ceiling_is_not_rankable_with_reason():
+def test_nonpositive_continuation_keeps_negative_path_and_explicit_limited_liability_endpoint():
     d = operating()
-    for key in ("balance_sheet", "quarterly_balance_sheet"):
-        d[key].loc["Total Debt"] = [50000.0] * len(d[key].columns)   # debt far above any business value
-    cfg = {**CFG,"rates":{**CFG["rates"],"USD":{**CFG["rates"]["USD"],"g":0.0}}}
-    m = run(d,cfg)
-    assert "ceiling" in m["not_rankable"]
-    assert math.isnan(m.get("entry_score", math.nan))
+    d['ttm_income_stmt'].loc['Net Income Common Stockholders']=-1e7
+    m=run(d)
+    path=json.loads(m['scenario_results'])['base']
+    assert path['raw_value']<0 and path['cashflows'][0]<0
+    assert path['funding_required']>1e7
+    assert m['entry_ceiling']==0 and m['entry_score']==-100
+    assert 'limited-liability endpoint' in m['flags']
 
 
 def test_entry_score_is_floored_at_minus_100():
@@ -161,20 +162,28 @@ def test_old_cash_flow_statement_is_not_a_critical_stale_flag():
     assert "cash flow stale" in m["flags"] and "stale financials" not in m["flags"]
 
 
-def test_unknown_reporting_currency_blocks_ranking():
+def test_missing_local_rate_uses_explicit_constant_fx_base_policy_not_a_hidden_rate():
     d = operating()
     d["info"]["financialCurrency"] = "XYZ"
     m = run(d)
-    assert "XYZ" in m["not_rankable"]
+    assert 'XYZ/EUR' in m['currency_assumption']
+    assert 'Constant future' in m['currency_assumption']
+    assert m['hurdle']==pytest.approx(.03+.045)
+    same=operating();same['info']['financialCurrency']='EUR'
+    assert m['entry_ceiling']==pytest.approx(run(same)['entry_ceiling'])
 
 
-def test_growth_is_capped_at_return_on_new_capital():
+def test_growth_beyond_book_return_requires_priced_opening_and_future_equity():
     d = operating(revenue_estimate=pd.DataFrame({"growth": [0.60, 0.60]}, index=["0y", "+1y"]))
     d["balance_sheet"].loc["Stockholders Equity"] = [2000, 1900, 1800, 1700]   # invested ~2000 -> ROIC ~ 8%
     d["quarterly_balance_sheet"].loc["Stockholders Equity"] = [2000]
     m = run(d)
-    assert m["est_growth"] == pytest.approx(m["return_on_capital"])
-    assert "growth capped" in m["flags"]
+    params=json.loads(m['scenario_parameters'])['base']
+    assert params['growth']==pytest.approx(.60)
+    path=json.loads(m['scenario_results'])['base']
+    assert path['opening_distribution']==pytest.approx(-2000*.6)
+    assert path['funding_required']>=1200
+    assert 'owner capital contributions' in m['flags']
 
 
 def test_financial_uses_net_income_roe_and_market_cap():
@@ -183,10 +192,12 @@ def test_financial_uses_net_income_roe_and_market_cap():
     m = run(d)
     assert m["class"] == "financial"
     ni = 152 * 1.05
-    assert m["base_earnings"] == pytest.approx(ni)
-    assert m["return_on_capital"] == pytest.approx(ni / 600)
-    assert "requires explicit sector inputs" in m["not_rankable"]
-    assert "entry_score" not in m
+    params=json.loads(m['scenario_parameters'])['base']
+    assert params['roe_start']==pytest.approx(ni/600)
+    path=json.loads(m['scenario_results'])['base']
+    assert path['ledger'][0]['common_earnings']==pytest.approx(ni)
+    assert path['ledger'][0]['net_distribution']==pytest.approx(ni-params['book_growth_start']*600)
+    assert 'not regulatory capital' in m['model_uncertainties']
 
 
 def test_cash_flow_items_come_from_one_statement():
@@ -194,7 +205,7 @@ def test_cash_flow_items_come_from_one_statement():
     d["ttm_cashflow"] = d["ttm_cashflow"].drop(index="Capital Expenditure")
     m = run(d)
     assert "cash flow: annual not TTM" in m["flags"]
-    assert m["fcf_yield"] == pytest.approx((220 - 40 - 10) / 2050)   # all annual, not a TTM/annual mix
+    assert m["fcf_yield"] == pytest.approx((220 - 40 - 10) / 2000)   # after-financing cash / common market cap
     assert m["data_as_of"] == "2025-12-31"                            # oldest period actually used
 
 
@@ -203,20 +214,30 @@ def test_positive_ebit_with_negative_fcf_is_still_rankable():
     d["ttm_cashflow"].loc["Capital Expenditure"] = [-400]
     m = run(d)
     assert m["class"] == "operating" and m["not_rankable"] == ""
-    assert "negative FCF" in m["flags"]
+    assert m['fcf_yield']==pytest.approx((220*1.05-400-10*1.05)/2000)
+    assert m['fcf_yield']<0
+    assert 'capital_structure' in m['model_assumptions']
 
 
-def test_loss_making_is_not_ranked():
+def test_common_losses_are_retained_before_conditional_recovery():
     d = operating()
     d["ttm_income_stmt"].loc["Operating Income"] = [-5]
+    d['ttm_income_stmt'].loc['Net Income Common Stockholders']=-50
     m = run(d)
-    assert m["class"] == "preprofit"
+    path=json.loads(m['scenario_results'])['base']
+    assert path['ledger'][0]['common_earnings']==pytest.approx(-50*1.1)
+    assert path['cashflows'][0]<-50
+    assert path['funding_required']>50
+    assert 'Recovery scenario' in m['model_uncertainties']
 
 
 # ---------------- second round: adverse realism, smoothing, financial sub-families, currency, visibility
-def test_adverse_growth_haircut_mode_still_available():
-    m = run(operating(), cfg_with(adverse_growth_mode="haircut"))
-    assert m["adverse_growth"] == pytest.approx(min(m["est_growth"], m["rev_cagr_3y"], m["analyst_growth"]) - 0.05)
+def test_scenario_envelope_retains_observed_crossing_and_is_not_a_probability_claim():
+    m=run(operating())
+    values=[m[k] for k in ('value_reasonable','value_adverse','value_upside')]
+    assert m['valuation_range_low_px']==pytest.approx(m['price']*min(values)/m['mcap_fc'])
+    assert m['valuation_range_high_px']==pytest.approx(m['price']*max(values)/m['mcap_fc'])
+    assert 'not confidence bounds' in m['model_assumptions']
 
 
 def cyclical(**over):
@@ -226,56 +247,62 @@ def cyclical(**over):
     return d
 
 
-def test_cyclical_adverse_case_uses_trough_margin_and_trend_growth():
-    import numpy as np
+def test_cyclical_model_preserves_common_margin_observations_and_cycle_uncertainty():
     m = run(cyclical(), cfg_with(cyclical_adverse_margin="min", cyclical_adverse_growth_at_terminal=True))
     assert m["class"] == "cyclical"
-    margins = [200 / 1000, 182 / 909, 165 / 826, 150 / 751]  # overlapping TTM is not an independent year
-    assert m["base_earnings"] == pytest.approx(float(np.median(margins)) * 1050 * 0.8)
-    rev_adverse = min(1050, (826 + 909 + 1000 + 1050) / 4)
-    assert m["base_earnings_adverse"] == pytest.approx(min(margins) * rev_adverse * 0.8)
-    assert m["adverse_growth"] == pytest.approx(0.03)          # capped at terminal growth
+    margins=[152/1000,138/909,124/826,112/751,159.6/1050]
+    params=json.loads(m['scenario_parameters'])
+    assert params['base']['margin_terminal']==pytest.approx(median(margins))
+    assert params['stress']['margin_terminal']<=params['base']['margin_terminal']
+    assert 'not a certified full-cycle forecast' in m['model_uncertainties']
 
 
-def test_return_on_capital_uses_lower_of_current_and_three_year_average():
-    m0 = run(operating())
-    m = run(operating(), cfg_with(return_smoothing=True))
-    tax = 0.2
-    annual = [(200 * (1-tax))/((650+555)/2), (182 * (1-tax))/((555+460)/2), (165 * (1-tax))/((460+365)/2)]
-    avg3 = sum(annual) / 3
-    assert m["return_on_capital"] == pytest.approx(min(m0["return_on_capital"], avg3))
-    assert m["return_on_capital"] <= m0["return_on_capital"]
+def test_historical_capital_intensity_widens_investment_stress_without_changing_current_capital():
+    data=operating();baseline=run(data)
+    data['balance_sheet'].loc['Stockholders Equity',pd.Timestamp('2022-12-31')]=3000
+    changed=run(data)
+    original=json.loads(baseline['scenario_parameters']);params=json.loads(changed['scenario_parameters'])
+    assert params['base']['equity_to_sales']==original['base']['equity_to_sales']
+    assert params['stress']['equity_to_sales']==pytest.approx(3000/751)
+    assert changed['funding_required_stress']>baseline['funding_required_stress']
 
 
-def test_insurer_base_is_lower_of_ttm_and_three_year_average():
+def test_insurer_uses_common_equity_scenarios_without_pretending_book_capital_is_solvency():
     d = operating()
     d["info"]["industry"] = "Insurance - Reinsurance"
     m = run(d, cfg_with(insurer_smooth_earnings=True))
-    assert m["fin_type"] == "insurer"
-    assert m["base_earnings"] == pytest.approx(min(152 * 1.05, (152 + 138 + 124) / 3))
+    assert m['model_family']=='insurer'
+    path=json.loads(m['scenario_results'])['base']
+    assert path['ledger'][0]['common_earnings']==pytest.approx(152*1.05)
+    assert 'credit/catastrophe stress are not identified' in m['model_uncertainties']
 
 
-def test_thin_bank_capital_is_flagged():
+def test_bank_book_capital_ratio_is_context_not_a_false_regulatory_capital_test():
     d = operating()
     d["info"]["industry"] = "Banks - Regional"
     for key in ("balance_sheet", "quarterly_balance_sheet"):
         d[key].loc["Total Assets"] = [20000.0] * len(d[key].columns)   # equity / assets = 3%
     m = run(d)
-    assert m["fin_type"] == "bank" and "thin capital" in m["flags"]
+    assert m['model_family']=='bank' and m['equity_to_assets']==pytest.approx(.03)
+    assert 'not regulatory capital' in m['model_uncertainties']
+    assert 'thin capital' not in m['flags']
 
 
-def test_platform_override_requires_segment_evidence():
+def test_platform_override_supports_group_equity_and_exposes_missing_segment_evidence():
     m = run(operating(), override="financial")
-    assert m["fin_type"] == "platform" and "hybrid" in m["not_rankable"]
-    assert "not a conservative" in m["flags"]
+    assert m['model_family']=='hybrid' and m['model']=='equity_residual_income'
+    assert json.loads(m['business_profile'])['diversified']
+    assert 'segment evidence' in m['flags']
+    assert m['implied_return_claim']=='equity'
 
 
 def test_minimum_hurdle_applies_after_currency_lookup():
     d = operating()
     d["info"]["financialCurrency"] = "CHF"
     m = run(d, cfg_with(min_hurdle=0.07))
-    assert m["hurdle"] == pytest.approx(0.07) and "min hurdle" in m["caps_hit"]
-    assert m["floor_rate"] <= m["hurdle"]
+    assert m["hurdle"] == pytest.approx(0.07)
+    assert m['discount_rate']==pytest.approx(.07)
+    assert json.loads(m['scenario_parameters'])['base']['terminal_equity_return']==pytest.approx(.07)
 
 
 def test_country_risk_premium_raises_both_rates():
@@ -288,19 +315,28 @@ def test_country_risk_premium_raises_both_rates():
     assert m["floor_rate"] == pytest.approx(m["hurdle"])
 
 
-def test_fx_parity_scenario_is_named_separately_from_expected_return():
+def test_multi_driver_valuation_can_identify_yield_without_identifying_growth_or_fx_returns():
     m = run(operating())
     assert "implied_return_base" not in m
-    assert m["fx_parity_return"] == pytest.approx((1+m["implied_return"])*1.03/1.05-1)
+    assert 'fx_parity_return' not in m
+    path=json.loads(m['scenario_results'])['base']
+    assert min(path['cashflows']+[path['terminal_cashflow']])>=0
+    assert m['implied_return_status']=='solved'
+    repriced=path['opening_distribution']+V.discount(path['cashflows'],path['terminal_cashflow'],m['implied_return'],path['terminal_growth'])
+    assert repriced==pytest.approx(m['mcap_fc'],rel=V.RESIDUAL_RTOL)
+    assert 'not identified' in m['implied_growth_status']
 
 
-def test_caps_hit_lists_binding_parameters():
+def test_growth_estimate_is_exposed_as_assumption_instead_of_hidden_book_return_cap():
     d = operating(revenue_estimate=pd.DataFrame({"growth": [0.60, 0.60]}, index=["0y", "+1y"]))
     d["balance_sheet"].loc["Stockholders Equity"] = [2000, 1900, 1800, 1700]
     d["quarterly_balance_sheet"].loc["Stockholders Equity"] = [2000]
     m = run(d)
-    assert "growth cap" in m["caps_hit"] and "growth <= R" in m["caps_hit"]
-    assert run(operating())["caps_hit"] == ""
+    params=json.loads(m['scenario_parameters'])['base']
+    assert params['growth']==pytest.approx(.6)
+    assumption=next(a for a in json.loads(m['model_assumptions']) if isinstance(a,dict) and a.get('parameter')=='initial_growth')
+    assert assumption['value']==pytest.approx(.6)
+    assert 'provider +1y fiscal revenue-growth estimate' in assumption['basis']
 
 
 class _FX:

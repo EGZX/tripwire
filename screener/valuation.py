@@ -87,6 +87,67 @@ def present_value(e0: float, g0: float, r: float, g_terminal: float, years: int,
     ds, terminal = distributions(e0, g0, g_terminal, years, R0, RT)
     return discount(ds, terminal, r, g_terminal)
 
+def solve_distribution_return(cashflows, terminal_cashflow: float, price: float,
+                              terminal_growth: float, opening_distribution: float = 0.0) -> Solution:
+    """Yield for a priced distribution path when uniqueness is established.
+
+    Solve ``opening_distribution + PV(future distributions) = price``.
+    A negative opening distribution is an additional initial contribution, so
+    the effective investment is price minus opening_distribution. Nonnegative
+    future cash flows with at least one positive payment have a strictly
+    decreasing PV. Signed future paths remain valid valuations but this solver
+    does not claim that their yield is unique, absent, or multiple.
+
+    Residuals use reporting-currency units; the numerical budget is relative to
+    the effective initial investment (the existing price budget when opening0).
+    Positive perpetuities require r>g; finite paths require r>-1. Search caps at3.
+    """
+    try:
+        ds = list(cashflows)
+        finite(*ds, terminal_cashflow, price, terminal_growth, opening_distribution)
+        if not ds or price <= 0 or terminal_growth <= -1:
+            raise InvalidModel("positive price, nonempty distributions and terminal growth above -100% required")
+        if any(x < 0 for x in [*ds, terminal_cashflow]):
+            return Solution("not_identified", reason="future distributions include capital calls; yield uniqueness has not been established")
+        investment = price - opening_distribution
+        if not math.isfinite(investment):
+            return Solution("unresolved", reason="net opening investment exceeds numerical range")
+        if not any(x > 0 for x in [*ds, terminal_cashflow]):
+            if investment == 0:
+                return Solution("indeterminate", reason="opening distribution exactly settles price; no future payment identifies a yield")
+            return Solution("no_solution", reason="no positive future distributions to match net opening investment")
+        if investment <= 0:
+            return Solution("no_solution", reason="opening distribution covers price and future distributions are positive; no finite yield equates value")
+        normalized = [d / investment for d in ds]
+        normalized_terminal = terminal_cashflow / investment
+        f = lambda r: discount(normalized, normalized_terminal, r, terminal_growth)-1
+        boundary, hi = (terminal_growth if terminal_cashflow else -1.0), 3.0
+        if boundary >= hi:
+            return Solution("outside_domain", reason="no return in the admissible discount domain up to 300%")
+        fhi = f(hi)
+        if fhi > 0:
+            return Solution("outside_domain", reason="matching return is above the 300% search bound")
+        if fhi == 0:
+            return Solution("solved", (hi,), (0.0,))
+        # Starting at0 avoids evaluating very long finite paths unnecessarily
+        # close to -100%. Approach the actual lower boundary only as needed.
+        lo = max(0.0, boundary + max(1e-12, abs(boundary)*1e-12)) if terminal_cashflow else 0.0
+        if lo >= hi:
+            return Solution("outside_domain", reason="admissible lower boundary is above the 300% search bound")
+        while f(lo) < 0:
+            next_lo = (lo + boundary) / 2
+            if next_lo == lo or next_lo <= boundary:
+                return Solution("unresolved", reason="return approaches the lower discount boundary beyond floating-point resolution")
+            lo = next_lo
+        root = brentq(f, lo, hi, xtol=ROOT_XTOL)
+        residual = f(root) * investment
+        if abs(residual / investment) > RESIDUAL_RTOL:
+            return Solution("unresolved", reason="return residual exceeds numerical tolerance")
+        return Solution("solved", (root,), (residual,))
+    except (ValueError, TypeError, OverflowError, ZeroDivisionError) as exc:
+        return Solution("invalid", reason=str(exc))
+
+
 def solve_return(e0: float, price: float, g0: float, g_terminal: float, years: int,
                  R0: float | None = None, RT: float | None = None) -> Solution:
     try:
@@ -94,23 +155,7 @@ def solve_return(e0: float, price: float, g0: float, g_terminal: float, years: i
         if price <= 0 or e0 <= 0:
             raise InvalidModel("positive price and earnings required")
         ds, terminal = distributions(e0, g0, g_terminal, years, R0, RT)
-        if not any(x > 0 for x in [*ds, terminal]):
-            return Solution("no_solution", reason="no positive distributions")
-        f = lambda r: discount([d/price for d in ds], terminal/price, r, g_terminal)-1
-        # Nonnegative cash flows make PV strictly decreasing: at most one root.
-        lo, hi = (g_terminal + max(1e-12, abs(g_terminal)*1e-12) if terminal else 0.0), 3.0
-        if terminal==0:
-            while f(lo)<0:
-                next_lo=(lo-1)/2
-                if next_lo==lo:return Solution("unresolved",reason="finite-payout return approaches -100% beyond floating-point resolution")
-                lo=next_lo
-        if lo >= hi or f(lo)*f(hi) > 0:
-            return Solution("outside_domain", reason="no return in the admissible discount domain up to 300%")
-        root = brentq(f, lo, hi, xtol=ROOT_XTOL)
-        residual = f(root)*price
-        if abs(residual/price) > RESIDUAL_RTOL:
-            return Solution("unresolved", reason="return residual exceeds numerical tolerance")
-        return Solution("solved", (root,), (residual,))
+        return solve_distribution_return(ds, terminal, price, g_terminal)
     except (ValueError, OverflowError, ZeroDivisionError) as exc:
         return Solution("invalid", reason=str(exc))
 

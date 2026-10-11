@@ -72,6 +72,17 @@ def test_summary_weights_holdings_by_euro_value(root):
     assert s["owned_at_or_below_ceiling_eur"] == pytest.approx(1000.0)
 
 
+def test_sparse_validation_report_loads_without_inventing_missing_numeric_inputs(root):
+    path=root/'data/history/screen_2026-10-11.csv'
+    pd.DataFrame([{'symbol':'AAA','class':'operating','status':'not rankable'}]).to_csv(path,index=False)
+    payload=Store(root).run_payload('2026-10-11')
+    row=payload['rows'][0]
+    assert row['entry_score'] is None and row['position_eur'] is None
+    assert row['price'] is None and row['ceiling_px'] is None
+    assert payload['summary']['median_score'] is None
+    json.dumps(payload,allow_nan=False)
+
+
 def test_first_run_has_no_changes(root):
     p = Store(root).run_payload("2026-10-03")
     assert p["previous"] is None and all(r["event"] == "" for r in p["rows"])

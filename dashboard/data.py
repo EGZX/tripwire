@@ -131,6 +131,7 @@ class Store:
         if not self.config_path.is_file():
             return {"available": False}
         from screener.report import METHOD
+        from screener.scoring import CRITICAL_FLAGS
         raw = self.config_path.read_bytes()
         cfg = tomllib.loads(raw.decode("utf-8"))
         v = cfg.get("valuation", {})
@@ -138,6 +139,7 @@ class Store:
         rates = [{"currency": ccy, **derived_rates(r, v), "as_of": r.get("as_of"), "age_days": configedit.age_days(r.get("as_of"), today)}
                  for ccy, r in sorted(cfg.get("rates", {}).items())]
         return {"available": True, "method": METHOD, "valuation": v, "scoring": cfg.get("scoring", {}), "rates": rates,
+                "critical_flags": list(CRITICAL_FLAGS),
                 "editable_keys": configedit.EDITABLE_VALUATION, "rate_ranges": configedit.RATE_RANGES,
                 "sha": hashlib.sha256(raw).hexdigest(),
                 "modified": datetime.fromtimestamp(self.config_path.stat().st_mtime).isoformat(timespec="minutes")}
@@ -242,6 +244,9 @@ def normalise(df: pd.DataFrame) -> pd.DataFrame:
     df["symbol"] = df["symbol"].fillna("").astype(str)
     for col in ("owned", "candidate"):
         df[col] = df[col].map(_truthy) if col in df else False
+    for col in ('entry_score','price','ceiling_px','position_eur'):
+        if col not in df:
+            df[col]=math.nan
     if "status" in df and df["status"].isna().all():
         df["status"] = None
     return df
