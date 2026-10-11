@@ -60,13 +60,15 @@ def main(argv: list[str] | None = None) -> int:
     t0 = time.time()
     log = lambda msg: print(msg, flush=True)
 
-    listed = universe.load_watchlist(ROOT / ic["watchlist"])
+    entries = universe.merge(universe.load_watchlist(ROOT / ic["watchlist"]),
+                             universe.load_holdings(ROOT / ic["holdings"]))
+    # Index lists join only by exact Yahoo symbol (dedupe after resolution), never by company-name matching:
+    # a fund named after its issuer ("Acme Global Equity ETF") must not attach to the issuer's stock.
     for label, path in (ic.get("index_lists") or {}).items():
         rows = universe.load_index_list(ROOT / path, label)
         if not rows:
             log(f"Index list {label!r} not found at {path}; create it with: python tools/refresh_index_list.py")
-        listed += rows
-    entries = universe.merge(listed, universe.load_holdings(ROOT / ic["holdings"]))
+        entries += rows
     if not entries:
         log(f"No input: create {ic['watchlist']} (and optionally {ic['holdings']}); see examples/")
         return 1

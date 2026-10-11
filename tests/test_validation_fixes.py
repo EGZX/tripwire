@@ -346,3 +346,14 @@ def test_capital_calls_before_payouts_still_identify_a_unique_yield():
     assert sum((a > 0) != (b > 0) for a, b in zip(gaps, gaps[1:])) == 1
     late_call = V.solve_distribution_return([20.0, -50.0, 30.0], 10.0, 100.0, g)
     assert late_call.status == "not_identified"                       # contribution after payouts: not claimed
+
+
+def test_holdings_never_attach_to_index_rows_by_company_name(tmp_path):
+    from screener import universe
+    p = tmp_path / "idx.csv"
+    p.write_text("yahoo_symbol,name" + chr(10) + "ACME,Acme" + chr(10), encoding="utf-8")
+    fund = universe.Entry(key="XS0000000001", name="Acme Global Equity UCITS ETF Acc", isin="XS0000000001", owned=True,
+                          lists={"Holdings"})
+    merged = universe.merge([], [fund]) + universe.load_index_list(p, "S&P 500")
+    ivz = next(e for e in merged if e.yahoo == "IVZ")
+    assert not ivz.owned and ivz.lists == {"S&P 500"}
